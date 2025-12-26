@@ -28,7 +28,7 @@ export function Sidebar({ currentMode, onModeChange }: SidebarProps) {
           />
           Excel Review
         </h1>
-        <p className="text-xs text-zinc-500 mt-1 ml-1">桌面版 v1.0.6</p>
+        <p className="text-xs text-zinc-500 mt-1 ml-1">桌面版 v1.1.0</p>
       </div>
 
       <nav className="flex-1 px-4 space-y-1">
