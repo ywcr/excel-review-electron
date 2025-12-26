@@ -1,0 +1,325 @@
+/* ImagePreview 组件样式 */
+
+/* 基础图片预览 */
+.image-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  background: #f3f4f6;
+}
+
+.image-preview.loading {
+  min-height: 80px;
+}
+
+.image-preview.error {
+  flex-direction: column;
+  gap: 0.25rem;
+  color: #dc2626;
+  font-size: 0.75rem;
+  padding: 1rem;
+  background: #fef2f2;
+}
+
+.image-preview.clickable {
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.image-preview.clickable:hover {
+  transform: scale(1.02);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid #e5e7eb;
+  border-top-color: #667eea;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 懒加载占位 */
+.lazy-placeholder {
+  cursor: pointer;
+  min-height: 80px;
+  transition: background 0.2s;
+}
+
+.lazy-placeholder:hover {
+  background: #e5e7eb;
+}
+
+.lazy-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.lazy-icon {
+  font-size: 1.5rem;
+  opacity: 0.5;
+}
+
+.lazy-text {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+/* 模态框 */
+.image-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 2rem;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.image-modal {
+  background: white;
+  border-radius: 1rem;
+  max-width: 90vw;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: slideIn 0.2s ease;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.modal-title h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: #1f2937;
+}
+
+.modal-subtitle {
+  margin: 0.25rem 0 0 0;
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 1.25rem;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  transition: color 0.2s, background 0.2s;
+}
+
+.modal-close:hover {
+  color: #1f2937;
+  background: #f3f4f6;
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  max-height: 75vh;
+}
+
+.modal-image-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: #f9fafb;
+}
+
+.modal-image {
+  max-width: 100%;
+  max-height: 60vh;
+  object-fit: contain;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.modal-details {
+  padding: 1rem 1.5rem;
+  border-top: 1px solid #e5e7eb;
+  background: white;
+}
+
+.modal-details h4 {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.875rem;
+  color: #374151;
+}
+
+.details-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+
+.detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.detail-label {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.detail-value {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #1f2937;
+}
+
+.detail-value.error {
+  color: #dc2626;
+}
+
+.detail-value.warning {
+  color: #d97706;
+}
+
+.detail-value.critical {
+  color: #991b1b;
+  font-weight: 600;
+}
+
+/* 缩略图网格 */
+.thumbnail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 1rem;
+}
+
+.thumbnail-item {
+  position: relative;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  border: 2px solid transparent;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.thumbnail-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.thumbnail-item.blur {
+  border-color: #fbbf24;
+}
+
+.thumbnail-item.duplicate {
+  border-color: #f87171;
+}
+
+.thumbnail-item.suspicious {
+  border-color: #fb923c;
+}
+
+.thumbnail-image {
+  width: 100%;
+  height: 80px;
+  object-fit: cover;
+}
+
+.thumbnail-info {
+  padding: 0.5rem;
+  background: #f9fafb;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.thumbnail-id {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #374151;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thumbnail-pos {
+  font-size: 0.625rem;
+  color: #6b7280;
+}
+
+.thumbnail-badge {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.25rem;
+  padding: 0.125rem 0.375rem;
+  font-size: 0.625rem;
+  font-weight: 600;
+  border-radius: 0.25rem;
+}
+
+.thumbnail-badge.blur {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.thumbnail-badge.duplicate {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.thumbnail-badge.suspicious {
+  background: #fed7aa;
+  color: #9a3412;
+}
+
+.no-images {
+  text-align: center;
+  padding: 2rem;
+  color: #6b7280;
+  font-size: 0.875rem;
+}
