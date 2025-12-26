@@ -2,8 +2,7 @@ import React from "react";
 import { 
   FileTextIcon, 
   FolderIcon, 
-  BarChartIcon,
-  ZapIcon 
+  BarChartIcon
 } from "../UI/Icons";
 
 interface SidebarProps {
@@ -22,7 +21,11 @@ export function Sidebar({ currentMode, onModeChange }: SidebarProps) {
     <aside className="w-[240px] bg-zinc-50 border-r border-zinc-200 flex flex-col h-full">
       <div className="p-6">
         <h1 className="text-xl font-extrabold tracking-tight text-zinc-900 flex items-center gap-2">
-          <ZapIcon size={24} className="text-green-600" />
+          <img 
+            src="./icon.png" 
+            alt="Logo" 
+            className="w-7 h-7 rounded-md shadow-sm"
+          />
           Excel Review
         </h1>
         <p className="text-xs text-zinc-500 mt-1 ml-1">桌面版 v1.0.6</p>
