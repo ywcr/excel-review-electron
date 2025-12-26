@@ -1,7 +1,8 @@
 {
   "name": "excel-review-electron",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Excel审核系统 - Electron桌面版",
+  "author": "ywcr",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -45,7 +46,6 @@
     "asarUnpack": [
       "node_modules/sharp/**/*"
     ],
-    "nativeRebuilder": "sequential",
     "mac": {
       "target": [
         "dmg",
