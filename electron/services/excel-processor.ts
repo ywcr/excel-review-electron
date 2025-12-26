@@ -54,7 +54,7 @@ export class ExcelStreamProcessor {
     // 遍历工作表
     console.log("📂 [工作表扫描] 开始遍历工作表...");
     for await (const worksheetReader of workbookReader) {
-      const currentSheetName = worksheetReader.name;
+      const currentSheetName = (worksheetReader as any).name;
       console.log(`📄 [工作表] 发现: "${currentSheetName}"`);
 
       // 收集所有工作表信息
