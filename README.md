@@ -37,6 +37,28 @@ npm run build:win
 
 构建完成后，安装包在 `release` 目录中。
 
+## GitHub Actions 自动构建
+
+本项目配置了 GitHub Actions，支持自动跨平台构建。
+
+### 手动触发构建
+
+1. 进入 GitHub 仓库的 **Actions** 页面
+2. 选择 **Build and Release** 工作流
+3. 点击 **Run workflow** 按钮
+
+### 自动发布 Release
+
+当推送以 `v` 开头的 tag 时，会自动构建并发布 Release：
+
+```bash
+# 创建并推送 tag
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+构建完成后，Windows (.exe) 和 macOS (.dmg) 安装包会自动上传到 GitHub Releases。
+
 ## 技术栈
 
 - **Electron 33+** - 桌面应用框架
