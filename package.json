@@ -1,6 +1,6 @@
 {
   "name": "excel-review-electron",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Excel审核系统 - Electron桌面版",
   "author": "ywcr",
   "main": "dist-electron/main.js",
