@@ -107,6 +107,7 @@ declare global {
     electron: {
       selectFile: () => Promise<string | null>;
       selectMultipleFiles: () => Promise<string[]>;
+      getExcelSheets: (filePath: string) => Promise<{ sheets: string[]; error?: string }>;
       validateExcel: (
         filePath: string,
         taskName: string,

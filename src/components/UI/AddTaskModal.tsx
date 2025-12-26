@@ -35,12 +35,16 @@ export function AddTaskModal({
     const loadSheets = async () => {
       setIsLoading(true);
       try {
-        const result = await window.electron.getExcelSheets?.(filePath);
-        if (result && result.length > 0) {
-          setSheets(result);
-          // 自动选择第一个有数据的工作表
-          const firstWithData = result.find((s: Sheet) => s.hasData);
-          setSheetName(firstWithData?.name || result[0].name);
+        const result = await window.electron.getExcelSheets(filePath);
+        if (result && result.sheets && result.sheets.length > 0) {
+          // 将 string[] 转换为 Sheet[]，假设都有数据
+          const sheetList: Sheet[] = result.sheets.map((name) => ({
+            name,
+            hasData: true,
+          }));
+          setSheets(sheetList);
+          // 自动选择第一个工作表
+          setSheetName(sheetList[0].name);
         }
       } catch (err) {
         console.error("加载工作表失败:", err);
