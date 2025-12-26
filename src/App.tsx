@@ -3,10 +3,12 @@ import { useElectronValidation } from "./hooks/useElectronValidation";
 import { ValidationResults } from "./components/ValidationResults";
 import { BatchValidation } from "./components/BatchValidation";
 import { ExcelComparison } from "./components/ExcelComparison";
+import { PasscodeScreen } from "./components/PasscodeScreen";
 import { TASK_TEMPLATES } from "../shared/validation-rules";
 import "./styles/App.css";
 
 function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [mode, setMode] = useState<"single" | "batch" | "compare">("single");
   const [selectedTask, setSelectedTask] = useState("药店拜访");
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -24,6 +26,11 @@ function App() {
     cancelValidation,
     clearResult,
   } = useElectronValidation();
+
+  // 显示口令码验证界面
+  if (!isAuthenticated) {
+    return <PasscodeScreen onSuccess={() => setIsAuthenticated(true)} />;
+  }
 
   const availableTasks = Object.keys(TASK_TEMPLATES);
 
