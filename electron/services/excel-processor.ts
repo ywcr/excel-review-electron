@@ -169,9 +169,10 @@ export class ExcelStreamProcessor {
 
           totalRows++;
 
-          // 定期更新进度
-          if (totalRows % 100 === 0) {
-            const progress = Math.min(30 + (totalRows / 1000) * 50, 80);
+          // 定期更新进度（每 50 行更新一次）
+          if (totalRows % 50 === 0) {
+            // 行验证占 30-70%，使用更平滑的进度计算
+            const progress = Math.min(30 + Math.sqrt(totalRows) * 2, 70);
             onProgress?.(progress, `已验证 ${totalRows} 行`);
             console.log(`📊 [数据处理] 已验证 ${totalRows} 行`);
           }
@@ -207,7 +208,7 @@ export class ExcelStreamProcessor {
         )
       ).length,
     });
-    onProgress?.(85, "正在执行跨行验证...");
+    onProgress?.(70, "正在执行跨行验证...");
 
     // 执行跨行验证
     const crossRowErrors = validator.validateCrossRows(
@@ -217,7 +218,7 @@ export class ExcelStreamProcessor {
     errors.push(...crossRowErrors);
 
     console.log("🖼️ [图片验证开始]");
-    onProgress?.(90, "正在验证图片...");
+    onProgress?.(75, "正在验证图片...");
 
     // 图片验证
     const imageErrors: ImageValidationError[] = [];
@@ -310,7 +311,7 @@ export class ExcelStreamProcessor {
         );
         stats.totalImages = wpsImages.length;
         onProgress?.(
-          91,
+          76,
           `发现 ${wpsImages.length} 张 WPS 格式图片，正在验证...`
         );
 
@@ -398,6 +399,15 @@ export class ExcelStreamProcessor {
                 mimeType: thumbnail?.mimeType,
               });
             }
+
+            // 更新进度（每 3 张或最后一张时更新，图片验证占 76-95%）
+            if ((i + 1) % 3 === 0 || i === wpsImages.length - 1) {
+              const imgProgress = 76 + Math.floor(((i + 1) / wpsImages.length) * 19);
+              onProgress?.(
+                imgProgress,
+                `已验证 ${i + 1}/${wpsImages.length} 张图片`
+              );
+            }
           } catch (err) {
             console.error(`验证第 ${i} 张 WPS 图片失败:`, err);
           }
@@ -439,7 +449,7 @@ export class ExcelStreamProcessor {
         return { errors, stats };
       }
 
-      onProgress?.(91, `发现 ${images.length} 张图片，正在验证...`);
+      onProgress?.(76, `发现 ${images.length} 张图片，正在验证...`);
 
       // 验证每张图片
       for (let i = 0; i < images.length; i++) {
@@ -507,8 +517,9 @@ export class ExcelStreamProcessor {
           }
 
           // 更新进度
-          if ((i + 1) % 10 === 0 || i === images.length - 1) {
-            const imgProgress = 91 + Math.floor(((i + 1) / images.length) * 4);
+          if ((i + 1) % 5 === 0 || i === images.length - 1) {
+            // 图片验证占 76-95%
+            const imgProgress = 76 + Math.floor(((i + 1) / images.length) * 19);
             onProgress?.(
               imgProgress,
               `已验证 ${i + 1}/${images.length} 张图片`
