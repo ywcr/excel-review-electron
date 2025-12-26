@@ -4,8 +4,11 @@ import { ValidationResults } from "./components/ValidationResults";
 import { BatchValidation } from "./components/BatchValidation";
 import { ExcelComparison } from "./components/ExcelComparison";
 import { PasscodeScreen } from "./components/PasscodeScreen";
+import { AppLayout } from "./components/Layout/AppLayout";
+import { GhostButton } from "./components/UI/Buttons";
+import { SheetSelectionModal } from "./components/UI/SheetSelectionModal";
 import { TASK_TEMPLATES } from "../shared/validation-rules";
-import "./styles/App.css";
+import "./styles/tailwind.css";
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -75,181 +78,162 @@ function App() {
   // 获取文件名
   const fileName = selectedFile ? selectedFile.split("/").pop() : undefined;
 
-  // 批量验证模式
-  if (mode === "batch") {
+  const renderContent = () => {
+    // 批量验证模式
+    if (mode === "batch") {
+      return (
+        <BatchValidation
+          availableTasks={availableTasks}
+          defaultTask={selectedTask}
+          onClose={() => setMode("single")}
+        />
+      );
+    }
+
+    // 比较模式
+    if (mode === "compare") {
+      return <ExcelComparison onClose={() => setMode("single")} />;
+    }
+
+    // 单文件验证模式 (默认)
     return (
-      <div className="app">
-        <header className="app-header">
-          <h1>📊 Excel 审核系统</h1>
-          <p>Electron 桌面版 - 批量验证模式</p>
-        </header>
-
-        <main className="app-main">
-          <BatchValidation
-            availableTasks={availableTasks}
-            defaultTask={selectedTask}
-            onClose={() => setMode("single")}
-          />
-        </main>
-      </div>
-    );
-  }
-
-  // 比较模式
-  if (mode === "compare") {
-    return (
-      <div className="app">
-        <header className="app-header">
-          <h1>📊 Excel 审核系统</h1>
-          <p>Electron 桌面版 - 文件比较模式</p>
-        </header>
-
-        <main className="app-main">
-          <ExcelComparison onClose={() => setMode("single")} />
-        </main>
-      </div>
-    );
-  }
-
-  return (
-    <div className="app">
-      <header className="app-header">
-        <h1>📊 Excel 审核系统</h1>
-        <p>Electron 桌面版 - 支持超大文件处理</p>
-      </header>
-
-      <main className="app-main">
-        {/* 模式切换 */}
-        <div className="mode-switch">
-          <button className="mode-btn active">📄 单文件验证</button>
-          <button className="mode-btn" onClick={() => setMode("batch")}>
-            📁 批量验证
-          </button>
-          <button className="mode-btn" onClick={() => setMode("compare")}>
-            📊 文件比较
-          </button>
+      <div className="space-y-8 animate-fade-in">
+        <div className="flex items-center justify-between mb-8">
+            <h1 className="text-2xl font-extrabold tracking-tight text-zinc-900">单文件验证</h1>
         </div>
 
-        {/* 任务选择 */}
-        <section className="section">
-          <h2>1. 选择任务类型</h2>
-          <select
-            value={selectedTask}
-            onChange={(e) => setSelectedTask(e.target.value)}
-            disabled={isValidating}
-          >
-            {availableTasks.map((task) => (
-              <option key={task} value={task}>
-                {task}
-              </option>
-            ))}
-          </select>
-        </section>
-
-        {/* 文件选择 */}
-        <section className="section">
-          <h2>2. 选择 Excel 文件</h2>
-          <button onClick={handleSelectFile} disabled={isValidating}>
-            选择文件
-          </button>
-          {selectedFile && (
-            <div className="file-info">
-              <p>已选择: {fileName}</p>
-              <small>{selectedFile}</small>
+        {/* 顶部操作区 */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* 任务选择卡片 */}
+          <section className="bg-white rounded-lg border border-zinc-200 p-6 shadow-sm hover:shadow-md transition-shadow duration-200">
+            <h2 className="text-sm font-bold text-zinc-900 mb-4 flex items-center gap-2">
+              <span className="w-1 h-4 bg-black rounded-full"></span>
+              1. 任务类型
+            </h2>
+            <div className="relative">
+              <select
+                value={selectedTask}
+                onChange={(e) => setSelectedTask(e.target.value)}
+                disabled={isValidating}
+                className="w-full appearance-none bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm font-medium rounded-md focus:ring-black focus:border-black block p-2.5 disabled:opacity-50 transition-colors"
+              >
+                {availableTasks.map((task) => (
+                  <option key={task} value={task}>
+                    {task}
+                  </option>
+                ))}
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-zinc-500">
+                <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+              </div>
             </div>
-          )}
-        </section>
+          </section>
 
-        {/* 工作表选择 - 当需要选择时显示 */}
-        {result?.needSheetSelection && result.availableSheets && (
-          <section className="section sheet-selection">
-            <h2>3. 选择工作表</h2>
-            <p className="info-text">
-              未找到匹配"{selectedTask}"的工作表，请手动选择：
-            </p>
-            <div className="sheet-list">
-              {result.availableSheets.map(
-                (sheet: { name: string; hasData: boolean }) => (
-                  <button
-                    key={sheet.name}
-                    className={`sheet-button ${
-                      selectedSheet === sheet.name ? "selected" : ""
-                    }`}
-                    onClick={() => handleSheetSelect(sheet.name)}
-                    disabled={!sheet.hasData}
-                  >
-                    <span className="sheet-name">{sheet.name}</span>
-                    {sheet.hasData ? (
-                      <span className="sheet-badge">有数据</span>
-                    ) : (
-                      <span className="sheet-badge empty">空表</span>
-                    )}
-                  </button>
-                )
+          {/* 文件选择卡片 */}
+          <section className="bg-white rounded-lg border border-zinc-200 p-6 shadow-sm hover:shadow-md transition-shadow duration-200">
+            <h2 className="text-sm font-bold text-zinc-900 mb-4 flex items-center gap-2">
+              <span className="w-1 h-4 bg-black rounded-full"></span>
+              2. Excel 文件
+            </h2>
+            <div className="flex flex-col gap-4">
+              <GhostButton 
+                onClick={handleSelectFile} 
+                disabled={isValidating}
+                className="w-full justify-center border border-zinc-200 hover:border-zinc-300"
+              >
+                {selectedFile ? "更换文件" : "选择 Excel 文件..."}
+              </GhostButton>
+              
+              {selectedFile && (
+                <div className="bg-zinc-50 rounded-md p-3 border border-zinc-100 flex items-center gap-3">
+                  <div className="text-2xl">📄</div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-zinc-900 truncate">{fileName}</p>
+                    <p className="text-xs text-zinc-500 truncate font-mono">{selectedFile}</p>
+                  </div>
+                </div>
               )}
             </div>
           </section>
+        </div>
+
+        {/* 工作表选择模态框 */}
+        <SheetSelectionModal
+          isOpen={!!(result?.needSheetSelection && result?.availableSheets)}
+          taskName={selectedTask}
+          sheets={result?.availableSheets || []}
+          onSelect={handleSheetSelect}
+          onCancel={cancelValidation}
+        />
+
+        {/* 操作栏 & 进度 */}
+        {selectedFile && !result?.needSheetSelection && (
+          <div className="flex flex-col gap-4">
+            {!isValidating ? (
+              <button 
+                onClick={handleValidate}
+                className="w-full py-3 bg-black text-white rounded-lg font-medium shadow-lg shadow-zinc-900/10 hover:shadow-zinc-900/20 hover:-translate-y-0.5 transition-all active:translate-y-0 active:shadow-none"
+              >
+                {result ? "重新审核" : "开始审核"}
+              </button>
+            ) : (
+              <button 
+                onClick={cancelValidation}
+                className="w-full py-3 bg-red-50 text-red-600 border border-red-100 rounded-lg font-medium hover:bg-red-100 transition-colors"
+              >
+                取消
+              </button>
+            )}
+
+            {/* 进度条 */}
+            {progress && (
+              <div className="bg-zinc-50 rounded-lg p-4 border border-zinc-100">
+                <div className="flex justify-between text-xs font-medium text-zinc-500 mb-2">
+                  <span>处理中...</span>
+                  <span>{progress.progress}%</span>
+                </div>
+                <div className="h-2 bg-zinc-200 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-black transition-all duration-300 ease-out"
+                    style={{ width: `${progress.progress}%` }}
+                  />
+                </div>
+                <p className="text-xs text-zinc-500 mt-2 font-mono">{progress.message}</p>
+              </div>
+            )}
+          </div>
         )}
 
-        {/* 开始验证 */}
-        {selectedFile &&
-          !result?.needSheetSelection &&
-          !result?.isValid !== undefined && (
-            <section className="section">
-              <h2>{result ? "重新验证" : "3. 开始验证"}</h2>
-              {!isValidating ? (
-                <button className="btn-primary" onClick={handleValidate}>
-                  {result ? "重新审核" : "开始审核"}
-                </button>
-              ) : (
-                <button className="btn-cancel" onClick={cancelValidation}>
-                  取消
-                </button>
-              )}
-            </section>
-          )}
-
-        {/* 进度显示 */}
-        {progress && (
-          <section className="section progress-section">
-            <div className="progress-bar">
-              <div
-                className="progress-fill"
-                style={{ width: `${progress.progress}%` }}
-              />
-            </div>
-            <p className="progress-text">
-              {progress.progress}% - {progress.message}
-            </p>
-          </section>
-        )}
-
-        {/* 错误显示 */}
+        {/* 错误提示 */}
         {error && (
-          <section className="section error-section">
-            <h3>❌ 验证失败</h3>
-            <p>{error}</p>
-          </section>
+          <div className="bg-red-50 border border-red-100 text-red-700 p-4 rounded-lg text-sm">
+            <span className="font-bold mr-2">Error:</span> {error}
+          </div>
         )}
 
-        {/* 验证结果 - 使用新的 ValidationResults 组件 */}
+        {/* 验证结果 */}
         {result && !result.needSheetSelection && (
-          <section className="section">
+          <div className="animate-slide-up">
             <ValidationResults
               result={result}
               taskName={selectedTask}
               fileName={fileName}
               onExport={
-                result.errors.length > 0 ||
-                (result.imageErrors?.length ?? 0) > 0
+                result.errors.length > 0 || (result.imageErrors?.length ?? 0) > 0
                   ? handleExport
                   : undefined
               }
             />
-          </section>
+          </div>
         )}
-      </main>
-    </div>
+      </div>
+    );
+  };
+
+  return (
+    <AppLayout currentMode={mode} onModeChange={setMode}>
+      {renderContent()}
+    </AppLayout>
   );
 }
 

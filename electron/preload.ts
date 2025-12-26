@@ -7,6 +7,10 @@ const electronAPI = {
   // 选择多个文件（批量验证用）
   selectMultipleFiles: () => ipcRenderer.invoke("select-multiple-files"),
 
+  // 获取 Excel 文件的工作表列表
+  getExcelSheets: (filePath: string) =>
+    ipcRenderer.invoke("get-excel-sheets", filePath),
+
   // 验证 Excel
   validateExcel: (filePath: string, taskName: string, sheetName?: string) =>
     ipcRenderer.invoke("validate-excel", filePath, taskName, sheetName),

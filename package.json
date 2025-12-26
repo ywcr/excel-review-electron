@@ -19,6 +19,7 @@
     "sharp": "^0.34.5"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.18",
     "@types/adm-zip": "^0.5.7",
     "@types/node": "^20.19.27",
     "@types/react": "^18.2.48",
@@ -26,8 +27,10 @@
     "@vitejs/plugin-react": "^4.2.1",
     "electron": "^33.0.0",
     "electron-builder": "^24.9.1",
+    "postcss": "^8.5.6",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "tailwindcss": "^4.1.18",
     "typescript": "^5.3.3",
     "vite": "^5.0.11",
     "vite-plugin-electron": "^0.28.4",
@@ -51,17 +54,23 @@
         "dmg",
         "zip"
       ],
-      "category": "public.app-category.productivity"
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.png"
     },
     "win": {
+      "icon": "build/icon.png",
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     }

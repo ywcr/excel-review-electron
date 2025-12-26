@@ -73,6 +73,24 @@ function registerIpcHandlers() {
     return result.filePaths;
   });
 
+  // 获取 Excel 文件的工作表列表
+  ipcMain.handle("get-excel-sheets", async (_event, filePath: string) => {
+    try {
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.readFile(filePath);
+      
+      const sheets = workbook.worksheets.map((ws) => ({
+        name: ws.name,
+        hasData: ws.rowCount > 1, // 至少有标题行+数据行
+      }));
+      
+      return sheets;
+    } catch (error) {
+      console.error("读取工作表错误:", error);
+      throw error;
+    }
+  });
+
   // 验证 Excel
   ipcMain.handle(
     "validate-excel",

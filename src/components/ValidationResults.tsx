@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { ImageModal } from "./ImagePreview";
-import "./ValidationResults.css";
+import { GhostButton, OutlineButton } from "./UI/Buttons";
 
 interface ValidationError {
   row: number;
@@ -82,6 +82,12 @@ const ERROR_TYPE_LABELS: Record<string, string> = {
   medicalLevel: "医疗类型错误",
 };
 
+const IMAGE_ERROR_TYPE_LABELS: Record<string, string> = {
+  blur: "模糊",
+  duplicate: "重复",
+  suspicious: "可疑",
+};
+
 export function ValidationResults({
   result,
   taskName,
@@ -97,6 +103,18 @@ export function ValidationResults({
   const errorsPerPage = 20;
 
   const { errors, summary, imageErrors } = result;
+
+  // 排序后的图片错误：重复错误排在最前面
+  const sortedImageErrors = useMemo(() => {
+    if (!imageErrors) return [];
+    return [...imageErrors].sort((a, b) => {
+      // duplicate 排在最前面
+      if (a.errorType === "duplicate" && b.errorType !== "duplicate") return -1;
+      if (a.errorType !== "duplicate" && b.errorType === "duplicate") return 1;
+      // 其次按图片索引排序
+      return a.imageIndex - b.imageIndex;
+    });
+  }, [imageErrors]);
 
   // 获取唯一的错误类型
   const errorTypes = Array.from(new Set(errors.map((e) => e.errorType)));
@@ -120,38 +138,38 @@ export function ValidationResults({
   };
 
   return (
-    <div className="validation-results">
+    <div className="space-y-8 font-sans">
       {/* 头部信息 */}
-      <div className="results-header">
-        <h2>📊 验证结果</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-zinc-900 border-l-2 border-black pl-3">审核结果</h2>
         {onExport && (errors.length > 0 || (imageErrors?.length ?? 0) > 0) && (
-          <button onClick={onExport} className="btn-export">
-            📥 导出Excel
-          </button>
+          <GhostButton onClick={onExport} className="border border-zinc-200">
+            📥 导出 Excel
+          </GhostButton>
         )}
       </div>
 
-      {/* 基本信息卡片 */}
-      <div className="info-cards">
+      {/* 基本信息卡片 - 极简 Data Grid 风格 */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-zinc-100 border border-zinc-200 rounded-lg overflow-hidden">
         {fileName && (
-          <div className="info-card">
-            <span className="info-label">文件名</span>
-            <span className="info-value">{fileName}</span>
+          <div className="bg-white p-4">
+            <span className="block text-xs font-semibold text-zinc-600 mb-1">文件名</span>
+            <span className="block text-sm font-mono text-zinc-900 truncate" title={fileName}>{fileName}</span>
           </div>
         )}
-        <div className="info-card">
-          <span className="info-label">任务类型</span>
-          <span className="info-value">{taskName}</span>
+        <div className="bg-white p-4">
+          <span className="block text-xs font-semibold text-zinc-600 mb-1">任务类型</span>
+          <span className="block text-sm font-medium text-zinc-900">{taskName}</span>
         </div>
         {result.usedSheetName && (
-          <div className="info-card">
-            <span className="info-label">工作表</span>
-            <span className="info-value">{result.usedSheetName}</span>
+          <div className="bg-white p-4">
+            <span className="block text-xs font-semibold text-zinc-600 mb-1">工作表</span>
+            <span className="block text-sm font-medium font-mono text-zinc-900">{result.usedSheetName}</span>
           </div>
         )}
-        <div className={`info-card ${result.isValid ? "success" : "error"}`}>
-          <span className="info-label">验证状态</span>
-          <span className="info-value">
+        <div className={`bg-white p-4 ${result.isValid ? "bg-green-50/30" : "bg-red-50/30"}`}>
+          <span className="block text-xs font-semibold text-zinc-600 mb-1">状态</span>
+          <span className={`block text-sm font-bold ${result.isValid ? "text-green-600" : "text-red-600"}`}>
             {result.isValid ? "✅ 通过" : "❌ 未通过"}
           </span>
         </div>
@@ -159,137 +177,132 @@ export function ValidationResults({
 
       {/* 表头验证失败提示 */}
       {result.headerValidation && !result.headerValidation.isValid && (
-        <div className="header-error-box">
-          <h4>⚠️ 表头验证失败</h4>
-          <p>Excel文件的表头与所选任务模板不匹配，请检查以下问题：</p>
+        <div className="bg-amber-50 rounded-lg p-6 border border-amber-100">
+          <h4 className="text-sm font-bold text-amber-900 mb-3 flex items-center gap-2">
+            <span>⚠️</span> 表头不匹配
+          </h4>
+          <p className="text-sm text-amber-800 mb-4">Excel 表头与任务模板要求不匹配。</p>
+          
           {result.headerValidation.missingFields.length > 0 && (
-            <div className="missing-fields">
-              <strong>缺失的必需字段：</strong>
-              <div className="field-tags">
+            <div className="mb-4">
+              <strong className="text-xs font-bold text-amber-900 uppercase tracking-wide">缺失字段</strong>
+              <div className="flex flex-wrap gap-2 mt-2">
                 {result.headerValidation.missingFields.map((field, i) => (
-                  <span key={i} className="field-tag">
+                  <span key={i} className="px-2 py-1 bg-white border border-amber-200 text-amber-800 text-xs rounded font-mono">
                     {field}
                   </span>
                 ))}
               </div>
             </div>
           )}
-          {result.headerValidation.suggestions &&
-            result.headerValidation.suggestions.length > 0 && (
-              <div className="suggestions">
-                <strong>可能的匹配建议：</strong>
-                <ul>
-                  {result.headerValidation.suggestions.map((s, i) => (
-                    <li key={i}>
-                      期望 "<strong>{s.expected}</strong>" → 找到 "
-                      <strong>{s.actual}</strong>" (相似度:{" "}
-                      {Math.round(s.similarity * 100)}%)
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+          
+          {result.headerValidation.suggestions && result.headerValidation.suggestions.length > 0 && (
+            <div>
+              <strong className="text-xs font-bold text-amber-900 uppercase tracking-wide">匹配建议</strong>
+              <ul className="mt-2 space-y-1">
+                {result.headerValidation.suggestions.map((s, i) => (
+                  <li key={i} className="text-sm text-amber-800 font-mono">
+                    期望 <span className="font-bold">{s.expected}</span> → 找到 <span className="font-bold">{s.actual}</span> (相似度 {Math.round(s.similarity * 100)}%)
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
 
       {/* 统计摘要 */}
-      <div className="summary-stats">
-        <div className="stat-box">
-          <span className="stat-number">{summary.totalRows}</span>
-          <span className="stat-label">总行数</span>
+      <div className="grid grid-cols-3 gap-6">
+        <div className="p-4 border-l-4 border-zinc-200 pl-4 bg-zinc-50/50">
+          <span className="block text-3xl font-bold text-zinc-900">{summary.totalRows}</span>
+          <span className="text-xs font-bold text-zinc-500 uppercase tracking-wider">总行数</span>
         </div>
-        <div className="stat-box success">
-          <span className="stat-number">{summary.validRows}</span>
-          <span className="stat-label">有效行数</span>
+        <div className="p-4 border-l-4 border-green-200 pl-4 bg-zinc-50/50">
+          <span className="block text-3xl font-bold text-green-700">{summary.validRows}</span>
+          <span className="text-xs font-bold text-green-600/60 uppercase tracking-wider">有效行数</span>
         </div>
-        <div className="stat-box error">
-          <span className="stat-number">{summary.errorCount}</span>
-          <span className="stat-label">错误数量</span>
+        <div className="p-4 border-l-4 border-red-200 pl-4 bg-zinc-50/50">
+          <span className="block text-3xl font-bold text-red-700">{summary.errorCount}</span>
+          <span className="text-xs font-bold text-red-600/60 uppercase tracking-wider">错误数量</span>
         </div>
       </div>
 
       {/* 图片统计 */}
       {summary.imageStats && summary.imageStats.totalImages > 0 && (
-        <div className="image-stats-section">
-          <h4>📷 图片验证统计</h4>
-          <div className="image-stats-grid">
-            <div className="stat-box">
-              <span className="stat-number">
-                {summary.imageStats.totalImages}
-              </span>
-              <span className="stat-label">总图片数</span>
+        <div className="border-t border-zinc-100 pt-6">
+          <h4 className="text-sm font-semibold text-zinc-900 mb-4 flex items-center gap-2">
+            📷 图片验证统计
+          </h4>
+          <div className="grid grid-cols-4 gap-4">
+            <div className="bg-zinc-50 rounded p-3 text-center border border-zinc-100">
+              <span className="block text-xl font-bold text-zinc-900">{summary.imageStats.totalImages}</span>
+              <span className="text-[10px] font-bold text-zinc-500 uppercase">总数</span>
             </div>
-            <div className="stat-box error">
-              <span className="stat-number">
-                {summary.imageStats.blurryImages}
-              </span>
-              <span className="stat-label">模糊图片</span>
+            <div className="bg-red-50/50 rounded p-3 text-center border border-red-100/50">
+              <span className="block text-xl font-bold text-red-700">{summary.imageStats.blurryImages}</span>
+              <span className="text-[10px] font-bold text-red-600/70 uppercase">模糊</span>
             </div>
-            <div className="stat-box warning">
-              <span className="stat-number">
-                {summary.imageStats.duplicateImages}
-              </span>
-              <span className="stat-label">重复图片</span>
+            <div className="bg-amber-50/50 rounded p-3 text-center border border-amber-100/50">
+              <span className="block text-xl font-bold text-amber-700">{summary.imageStats.duplicateImages}</span>
+              <span className="text-[10px] font-bold text-amber-600/70 uppercase">重复</span>
             </div>
-            <div className="stat-box warning">
-              <span className="stat-number">
-                {summary.imageStats.suspiciousImages}
-              </span>
-              <span className="stat-label">可疑图片</span>
+            <div className="bg-zinc-50 rounded p-3 text-center border border-zinc-100">
+              <span className="block text-xl font-bold text-zinc-700">{summary.imageStats.suspiciousImages}</span>
+              <span className="text-[10px] font-bold text-zinc-500 uppercase">可疑</span>
             </div>
           </div>
         </div>
       )}
 
-      {/* 数据错误详情 */}
+      {/* 数据错误详情 - Notion Database Style */}
       {errors.length > 0 && (
-        <div className="errors-section">
-          <div className="errors-header">
-            <h3>📝 数据错误详情</h3>
-            <div className="filter-group">
-              <label>筛选：</label>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-zinc-900">数据错误</h3>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-zinc-500">筛选：</span>
               <select
                 value={filterType}
                 onChange={(e) => {
                   setFilterType(e.target.value);
                   setCurrentPage(1);
                 }}
+                className="bg-transparent border-none text-xs font-medium text-zinc-900 focus:ring-0 cursor-pointer hover:bg-zinc-50 rounded py-1 px-2"
               >
                 <option value="all">全部错误 ({errors.length})</option>
                 {errorTypes.map((type) => (
                   <option key={type} value={type}>
-                    {getErrorTypeLabel(type)} (
-                    {errors.filter((e) => e.errorType === type).length})
+                    {getErrorTypeLabel(type)} ({errors.filter((e) => e.errorType === type).length})
                   </option>
                 ))}
               </select>
             </div>
           </div>
 
-          <div className="errors-table-wrapper">
-            <table className="errors-table">
+          <div className="overflow-x-auto border-t border-zinc-200">
+            <table className="w-full text-left border-collapse">
               <thead>
                 <tr>
-                  <th>行号</th>
-                  <th>字段</th>
-                  <th>错误类型</th>
-                  <th>错误信息</th>
-                  <th>当前值</th>
+                  <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200 w-16">行号</th>
+                  <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200 w-32">字段</th>
+                  <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200 w-32">类型</th>
+                  <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200">错误信息</th>
+                  <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200 w-48 text-right">当前值</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-zinc-100 font-mono text-sm">
                 {paginatedErrors.map((err, idx) => (
-                  <tr key={idx}>
-                    <td>{err.row}</td>
-                    <td>{err.field}</td>
-                    <td>
-                      <span className={`error-badge ${err.errorType}`}>
+                  <tr key={idx} className="group hover:bg-zinc-50 transition-colors">
+                    <td className="py-3 px-4 text-zinc-500">{err.row}</td>
+                    <td className="py-3 px-4 text-zinc-900 font-medium">{err.field}</td>
+                    <td className="py-3 px-4">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-red-50 text-red-700 border border-red-100/50">
                         {getErrorTypeLabel(err.errorType)}
                       </span>
                     </td>
-                    <td>{err.message}</td>
-                    <td className="value-cell">
-                      {err.value !== undefined ? String(err.value) : "-"}
+                    <td className="py-3 px-4 text-zinc-600">{err.message}</td>
+                    <td className="py-3 px-4 text-right text-zinc-500 truncate max-w-[200px]" title={String(err.value)}>
+                      {err.value !== undefined ? String(err.value) : <span className="text-zinc-300">-</span>}
                     </td>
                   </tr>
                 ))}
@@ -299,97 +312,84 @@ export function ValidationResults({
 
           {/* 分页 */}
           {totalPages > 1 && (
-            <div className="pagination">
-              <span className="page-info">
-                显示 {startIndex + 1} 到{" "}
-                {Math.min(startIndex + errorsPerPage, filteredErrors.length)}{" "}
-                条，共 {filteredErrors.length} 条错误
+            <div className="flex items-center justify-between pt-4 border-t border-zinc-100">
+              <span className="text-xs text-zinc-400">
+                显示 {startIndex + 1}-{Math.min(startIndex + errorsPerPage, filteredErrors.length)} 条，共 {filteredErrors.length} 条
               </span>
-              <div className="page-buttons">
-                <button
+              <div className="flex gap-2">
+                <OutlineButton
                   onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                   disabled={currentPage === 1}
-                  className="btn-page"
+                  className="h-8 px-3 py-0 text-xs"
                 >
                   上一页
-                </button>
-                <span className="page-current">
-                  {currentPage} / {totalPages}
-                </span>
-                <button
-                  onClick={() =>
-                    setCurrentPage((p) => Math.min(totalPages, p + 1))
-                  }
+                </OutlineButton>
+                <OutlineButton
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                   disabled={currentPage === totalPages}
-                  className="btn-page"
+                  className="h-8 px-3 py-0 text-xs"
                 >
                   下一页
-                </button>
+                </OutlineButton>
               </div>
             </div>
           )}
         </div>
       )}
 
-      {/* 图片错误详情 */}
-      {imageErrors && imageErrors.length > 0 && (
-        <div className="image-errors-section">
-          <h3>🖼️ 图片错误详情</h3>
-          <div className="errors-table-wrapper">
-            <table className="errors-table">
+      {/* 图片错误详情 - 重复的排在最前面 */}
+      {sortedImageErrors.length > 0 && (
+        <div className="space-y-4 pt-8 border-t border-zinc-200">
+          <h3 className="text-sm font-semibold text-zinc-900">图片错误</h3>
+          <div className="overflow-x-auto border-t border-zinc-200">
+            <table className="w-full text-left border-collapse">
               <thead>
                 <tr>
-                  <th>图片#</th>
-                  <th>位置</th>
-                  <th>错误类型</th>
-                  <th>错误信息</th>
-                  <th>详细信息</th>
-                  <th>预览</th>
+                  <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200 w-20">序号</th>
+                  <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200 w-32">位置</th>
+                  <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200 w-24">类型</th>
+                  <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200">详情</th>
+                  <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200 w-24 text-right">操作</th>
                 </tr>
               </thead>
-              <tbody>
-                {imageErrors.map((err, idx) => (
-                  <tr key={idx}>
-                    <td>#{err.imageIndex}</td>
-                    <td>
+              <tbody className="divide-y divide-zinc-100 font-mono text-sm">
+                {sortedImageErrors.map((err, idx) => (
+                  <tr key={idx} className="group hover:bg-zinc-50 transition-colors">
+                    <td className="py-3 px-4 text-zinc-500">#{err.imageIndex}</td>
+                    <td className="py-3 px-4 text-zinc-900">
                       行{err.row}
-                      {err.column && ` ${err.column}列`}
+                      {err.column && ` 列${err.column}`}
                     </td>
-                    <td>
-                      <span className={`img-error-badge ${err.errorType}`}>
-                        {err.errorType === "blur"
-                          ? "模糊"
-                          : err.errorType === "duplicate"
-                          ? "重复"
-                          : "可疑"}
+                    <td className="py-3 px-4">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${
+                        err.errorType === 'blur' ? 'bg-red-50 text-red-700 border-red-100' : 
+                        err.errorType === 'duplicate' ? 'bg-amber-50 text-amber-700 border-amber-100' :
+                        'bg-zinc-100 text-zinc-700 border-zinc-200'
+                      }`}>
+                        {IMAGE_ERROR_TYPE_LABELS[err.errorType] || err.errorType}
                       </span>
                     </td>
-                    <td>{err.message}</td>
-                    <td className="details-cell">
-                      {err.details?.blurScore !== undefined && (
-                        <span>清晰度: {err.details.blurScore.toFixed(1)}</span>
-                      )}
-                      {err.details?.duplicateOf !== undefined && (
-                        <span>与图片#{err.details.duplicateOf}重复</span>
-                      )}
-                      {err.details?.suspicionScore !== undefined && (
-                        <span>
-                          可疑度: {err.details.suspicionScore} (
-                          {err.details.suspicionLevel})
-                        </span>
-                      )}
+                    <td className="py-3 px-4 text-zinc-600">
+                      <div className="flex flex-col gap-0.5">
+                        <span>{err.message}</span>
+                        {err.details?.blurScore !== undefined && (
+                          <span className="text-xs text-zinc-400">清晰度: {err.details.blurScore.toFixed(1)}</span>
+                        )}
+                        {err.details?.duplicateOf !== undefined && (
+                          <span className="text-xs text-zinc-400">与图片 #{err.details.duplicateOf} 重复</span>
+                        )}
+                      </div>
                     </td>
-                    <td>
+                    <td className="py-3 px-4 text-right">
                       {err.imageData ? (
                         <button
-                          className="btn-preview"
                           onClick={() => setPreviewImage(err)}
-                          title="点击查看大图"
+                          className="text-xs font-medium text-zinc-900 hover:text-blue-600 hover:underline cursor-pointer transition-colors"
                         >
-                          🔍 查看
+                          查看
                         </button>
                       ) : (
-                        <span className="no-preview">-</span>
+                        <span className="text-zinc-300">-</span>
                       )}
                     </td>
                   </tr>
@@ -405,9 +405,7 @@ export function ValidationResults({
         <ImageModal
           imageData={previewImage.imageData}
           imageId={`图片 #${previewImage.imageIndex}`}
-          position={`行${previewImage.row}${
-            previewImage.column ? ` ${previewImage.column}列` : ""
-          }`}
+          position={`行${previewImage.row}${previewImage.column ? ` 列${previewImage.column}` : ""}`}
           message={previewImage.message}
           isOpen={!!previewImage}
           onClose={() => setPreviewImage(null)}
@@ -425,10 +423,12 @@ export function ValidationResults({
 
       {/* 验证通过提示 */}
       {result.isValid && errors.length === 0 && (
-        <div className="success-message">
-          <div className="success-icon">✅</div>
-          <h3>验证通过！</h3>
-          <p>所有数据均符合验证规则要求。</p>
+        <div className="bg-green-50 rounded-lg p-8 text-center border border-green-100">
+          <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">
+            ✅
+          </div>
+          <h3 className="text-lg font-bold text-green-900 mb-2">验证通过</h3>
+          <p className="text-green-700">所有数据均符合验证规则要求。</p>
         </div>
       )}
     </div>

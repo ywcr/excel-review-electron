@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import "./PasscodeScreen.css";
+import React from "react";
+
 
 interface PasscodeScreenProps {
   onSuccess: () => void;
@@ -9,12 +9,12 @@ const CORRECT_PASSCODE = "217664";
 const STORAGE_KEY = "excel-review-passcode-verified";
 
 export function PasscodeScreen({ onSuccess }: PasscodeScreenProps) {
-  const [passcode, setPasscode] = useState("");
-  const [error, setError] = useState("");
-  const [shake, setShake] = useState(false);
+  const [passcode, setPasscode] = React.useState("");
+  const [error, setError] = React.useState("");
+  const [shake, setShake] = React.useState(false);
 
   // 检查是否已经验证过
-  useEffect(() => {
+  React.useEffect(() => {
     const verified = localStorage.getItem(STORAGE_KEY);
     if (verified === "true") {
       onSuccess();
@@ -29,7 +29,7 @@ export function PasscodeScreen({ onSuccess }: PasscodeScreenProps) {
       localStorage.setItem(STORAGE_KEY, "true");
       onSuccess();
     } else {
-      setError("口令码错误，请重试");
+      setError("口令码错误");
       setShake(true);
       setPasscode("");
       setTimeout(() => setShake(false), 500);
@@ -43,45 +43,44 @@ export function PasscodeScreen({ onSuccess }: PasscodeScreenProps) {
   };
 
   return (
-    <div className="passcode-screen">
-      <div className={`passcode-card ${shake ? "shake" : ""}`}>
-        <div className="passcode-icon">🔐</div>
-        <h1>Excel 审核系统</h1>
-        <p className="passcode-subtitle">请输入口令码</p>
+    <div className="min-h-screen flex items-center justify-center bg-zinc-50">
+      <div className={`w-full max-w-sm bg-white p-8 rounded-xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] border border-zinc-100 text-center ${shake ? "animate-shake" : ""}`}>
+        <div className="mb-6 flex justify-center">
+          <div className="w-12 h-12 bg-black text-white rounded-lg flex items-center justify-center text-2xl shadow-lg">
+            ⚡
+          </div>
+        </div>
         
-        <form onSubmit={handleSubmit}>
-          <div className="passcode-input-wrapper">
+        <h1 className="text-xl font-bold text-zinc-900 mb-2">欢迎回来</h1>
+        <p className="text-sm text-zinc-500 mb-8">请输入访问口令</p>
+        
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="relative">
             <input
               type="password"
               value={passcode}
               onChange={handleChange}
-              placeholder="请输入6位口令码"
+              placeholder="输入口令码"
               maxLength={6}
               autoFocus
-              className="passcode-input"
+              className="w-full h-12 text-center text-xl tracking-[0.5em] font-mono rounded-lg border border-zinc-200 focus:border-black focus:ring-1 focus:ring-black outline-none transition-all placeholder:tracking-normal placeholder:text-zinc-300 placeholder:text-sm"
             />
-            <div className="passcode-dots">
-              {[...Array(6)].map((_, i) => (
-                <span
-                  key={i}
-                  className={`passcode-dot ${i < passcode.length ? "filled" : ""}`}
-                />
-              ))}
-            </div>
           </div>
           
-          {error && <p className="passcode-error">{error}</p>}
+          {error && <p className="text-red-500 text-xs font-medium">{error}</p>}
           
           <button
             type="submit"
-            className="passcode-button"
             disabled={passcode.length !== 6}
+            className="w-full h-10 bg-black text-white rounded-md text-sm font-medium hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            验证
+            验证访问
           </button>
         </form>
         
-        <p className="passcode-hint">请联系管理员获取口令码</p>
+        <p className="mt-6 text-xs text-zinc-400">
+          受保护系统 • 仅限授权人员
+        </p>
       </div>
     </div>
   );
