@@ -1,9 +1,9 @@
-import JSZip from 'jszip';
+import * as yauzl from 'yauzl';
 import * as fs from 'fs';
 
 /**
- * WPS 图片提取器 (支持大文件流式处理)
- * 从 WPS Excel 文件中提取 DISPIMG 格式的图片
+ * WPS 图片提取器 (支持超大文件流式处理)
+ * 使用 yauzl 流式读取 ZIP，无需将整个文件加载到内存
  */
 export class WpsImageExtractor {
   /**
@@ -35,51 +35,63 @@ export class WpsImageExtractor {
     }> = [];
 
     try {
-      console.log("📷 [WPS提取] 使用 JSZip 流式读取文件...");
-      
-      // 使用流式读取文件来支持大文件
-      const fileBuffer = await this.readFileInChunks(filePath);
-      const zip = await JSZip.loadAsync(fileBuffer);
+      // 获取文件大小用于日志
+      const stats = fs.statSync(filePath);
+      const fileSizeMB = stats.size / (1024 * 1024);
+      console.log(`📷 [WPS提取] 使用 yauzl 流式读取文件 (${fileSizeMB.toFixed(2)} MB)...`);
 
-      // 读取 cellimages.xml
-      const cellimagesXml = await this.readXmlEntry(zip, "xl/cellimages.xml");
-      if (!cellimagesXml) {
+      // 第一步：读取必要的 XML 配置文件
+      const xmlFiles = await this.readXmlFiles(filePath);
+      
+      if (!xmlFiles.cellimagesXml) {
         console.log("📷 [WPS提取] 未找到 cellimages.xml，非 WPS 格式");
         return images;
       }
 
-      // 读取 cellimages.xml.rels
-      const cellimagesRels = await this.readXmlEntry(
-        zip,
-        "xl/_rels/cellimages.xml.rels"
-      );
-      if (!cellimagesRels) {
+      if (!xmlFiles.cellimagesRels) {
         console.log("📷 [WPS提取] 未找到 cellimages.xml.rels");
         return images;
       }
 
       // 构建关系映射 rId -> 图片文件名
-      const embedRelMap = this.parseRelationships(cellimagesRels);
+      const embedRelMap = this.parseRelationships(xmlFiles.cellimagesRels);
       console.log(`📷 [WPS提取] 找到 ${embedRelMap.size} 个图片关系`);
 
       // 解析 cellimages.xml 获取图片信息
-      const cellImageInfos = this.parseCellImages(cellimagesXml);
+      const cellImageInfos = this.parseCellImages(xmlFiles.cellimagesXml);
       console.log(`📷 [WPS提取] 找到 ${cellImageInfos.length} 个图片定义，正在处理...`);
 
-      // 获取目标工作表文件
-      const worksheetFile = await this.getWorksheetFile(zip, targetSheet);
+      // 确定需要读取哪些图片文件
+      const requiredMediaFiles = new Set<string>();
+      for (const info of cellImageInfos) {
+        const mediaFile = embedRelMap.get(info.embedId);
+        if (mediaFile) {
+          requiredMediaFiles.add(`xl/media/${mediaFile}`);
+        }
+      }
 
-      // 为每个图片获取所有位置和数据（支持同一图片多次引用）
+      // 第二步：读取需要的图片文件
+      console.log(`📷 [WPS提取] 需要读取 ${requiredMediaFiles.size} 个图片文件...`);
+      const mediaBuffers = await this.readMediaFiles(filePath, requiredMediaFiles);
+      console.log(`📷 [WPS提取] 成功读取 ${mediaBuffers.size} 个图片文件`);
+
+      // 获取目标工作表的 DISPIMG 位置
+      const worksheetPositions = await this.getPositionsFromWorksheets(
+        xmlFiles.worksheets,
+        targetSheet
+      );
+
+      // 第三步：组装图片数据
       for (const info of cellImageInfos) {
         const mediaFile = embedRelMap.get(info.embedId);
         if (!mediaFile) continue;
 
+        const mediaPath = `xl/media/${mediaFile}`;
+        const imageBuffer = mediaBuffers.get(mediaPath);
+        if (!imageBuffer) continue;
+
         // 获取该图片的所有引用位置
-        const positions = await this.getAllPositionsFromDISPIMG(
-          zip,
-          info.dispimgId,
-          worksheetFile
-        );
+        const positions = worksheetPositions.get(info.dispimgId) || [];
 
         // 如果没有找到位置但指定了工作表，跳过
         if (positions.length === 0 && targetSheet) {
@@ -95,10 +107,6 @@ export class WpsImageExtractor {
             type: "图片",
           });
         }
-
-        // 读取图片数据
-        const imageBuffer = await this.readMediaFile(zip, mediaFile);
-        if (!imageBuffer) continue;
 
         // 为每个引用位置创建一个图片条目
         for (const position of positions) {
@@ -135,61 +143,232 @@ export class WpsImageExtractor {
   }
 
   /**
-   * 分块读取大文件 (支持 >2GB 文件)
+   * 使用 yauzl 流式读取 ZIP 中的 XML 配置文件
    */
-  private async readFileInChunks(filePath: string): Promise<Buffer> {
-    const stats = fs.statSync(filePath);
-    const fileSizeGB = stats.size / (1024 * 1024 * 1024);
-    
-    console.log(`📷 [WPS提取] 文件大小: ${(stats.size / (1024 * 1024)).toFixed(2)} MB`);
-    
-    // 对于特别大的文件，使用流式读取
-    if (fileSizeGB > 1) {
-      console.log(`📷 [WPS提取] 大文件模式，使用流式读取...`);
-      return new Promise((resolve, reject) => {
-        const chunks: Buffer[] = [];
-        const stream = fs.createReadStream(filePath);
-        
-        stream.on('data', (chunk: Buffer) => {
-          chunks.push(chunk);
+  private async readXmlFiles(filePath: string): Promise<{
+    cellimagesXml: string | null;
+    cellimagesRels: string | null;
+    workbookXml: string | null;
+    workbookRels: string | null;
+    worksheets: Map<string, string>;
+  }> {
+    const result: {
+      cellimagesXml: string | null;
+      cellimagesRels: string | null;
+      workbookXml: string | null;
+      workbookRels: string | null;
+      worksheets: Map<string, string>;
+    } = {
+      cellimagesXml: null,
+      cellimagesRels: null,
+      workbookXml: null,
+      workbookRels: null,
+      worksheets: new Map(),
+    };
+
+    const targetFiles = new Set([
+      'xl/cellimages.xml',
+      'xl/_rels/cellimages.xml.rels',
+      'xl/workbook.xml',
+      'xl/_rels/workbook.xml.rels',
+    ]);
+
+    return new Promise((resolve, reject) => {
+      yauzl.open(filePath, { lazyEntries: true }, (err, zipfile) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        if (!zipfile) {
+          reject(new Error('Failed to open ZIP file'));
+          return;
+        }
+
+        zipfile.readEntry();
+
+        zipfile.on('entry', (entry) => {
+          const fileName = entry.fileName;
+          
+          // 检查是否是我们需要的文件
+          const isTargetFile = targetFiles.has(fileName) || 
+            fileName.startsWith('xl/worksheets/') && fileName.endsWith('.xml');
+
+          if (isTargetFile && !entry.fileName.endsWith('/')) {
+            zipfile.openReadStream(entry, (err, readStream) => {
+              if (err || !readStream) {
+                zipfile.readEntry();
+                return;
+              }
+
+              const chunks: Buffer[] = [];
+              readStream.on('data', (chunk) => chunks.push(chunk));
+              readStream.on('end', () => {
+                const content = Buffer.concat(chunks).toString('utf-8');
+                
+                if (fileName === 'xl/cellimages.xml') {
+                  result.cellimagesXml = content;
+                } else if (fileName === 'xl/_rels/cellimages.xml.rels') {
+                  result.cellimagesRels = content;
+                } else if (fileName === 'xl/workbook.xml') {
+                  result.workbookXml = content;
+                } else if (fileName === 'xl/_rels/workbook.xml.rels') {
+                  result.workbookRels = content;
+                } else if (fileName.startsWith('xl/worksheets/')) {
+                  result.worksheets.set(fileName, content);
+                }
+
+                zipfile.readEntry();
+              });
+              readStream.on('error', () => zipfile.readEntry());
+            });
+          } else {
+            zipfile.readEntry();
+          }
         });
-        
-        stream.on('end', () => {
-          resolve(Buffer.concat(chunks));
+
+        zipfile.on('end', () => {
+          resolve(result);
         });
-        
-        stream.on('error', reject);
+
+        zipfile.on('error', (err) => {
+          reject(err);
+        });
       });
+    });
+  }
+
+  /**
+   * 使用 yauzl 流式读取指定的图片文件
+   */
+  private async readMediaFiles(
+    filePath: string,
+    requiredFiles: Set<string>
+  ): Promise<Map<string, Buffer>> {
+    const mediaBuffers = new Map<string, Buffer>();
+
+    if (requiredFiles.size === 0) {
+      return mediaBuffers;
     }
-    
-    // 小文件直接读取
-    return fs.promises.readFile(filePath);
+
+    return new Promise((resolve, reject) => {
+      yauzl.open(filePath, { lazyEntries: true }, (err, zipfile) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        if (!zipfile) {
+          reject(new Error('Failed to open ZIP file'));
+          return;
+        }
+
+        let processed = 0;
+        const total = requiredFiles.size;
+
+        zipfile.readEntry();
+
+        zipfile.on('entry', (entry) => {
+          const fileName = entry.fileName;
+
+          if (requiredFiles.has(fileName)) {
+            zipfile.openReadStream(entry, (err, readStream) => {
+              if (err || !readStream) {
+                processed++;
+                zipfile.readEntry();
+                return;
+              }
+
+              const chunks: Buffer[] = [];
+              readStream.on('data', (chunk) => chunks.push(chunk));
+              readStream.on('end', () => {
+                mediaBuffers.set(fileName, Buffer.concat(chunks));
+                processed++;
+                
+                // 进度日志
+                if (processed % 50 === 0 || processed === total) {
+                  console.log(`📷 [WPS提取] 读取图片进度: ${processed}/${total}`);
+                }
+
+                zipfile.readEntry();
+              });
+              readStream.on('error', () => {
+                processed++;
+                zipfile.readEntry();
+              });
+            });
+          } else {
+            zipfile.readEntry();
+          }
+        });
+
+        zipfile.on('end', () => {
+          resolve(mediaBuffers);
+        });
+
+        zipfile.on('error', (err) => {
+          reject(err);
+        });
+      });
+    });
   }
 
   /**
-   * 读取 ZIP 中的 XML 文件
+   * 从工作表 XML 中提取 DISPIMG 位置映射
    */
-  private async readXmlEntry(zip: JSZip, entryName: string): Promise<string | null> {
-    const entry = zip.file(entryName);
-    if (!entry) return null;
-    return entry.async("string");
-  }
+  private async getPositionsFromWorksheets(
+    worksheets: Map<string, string>,
+    targetSheet?: string
+  ): Promise<Map<string, Array<{ position: string; row: number; column: string; type: string }>>> {
+    const positionsMap = new Map<string, Array<{ position: string; row: number; column: string; type: string }>>();
 
-  /**
-   * 读取媒体文件
-   */
-  private async readMediaFile(zip: JSZip, mediaFile: string): Promise<Buffer | null> {
-    // 尝试多种路径格式
-    const paths = [`xl/media/${mediaFile}`, `xl/${mediaFile}`, mediaFile];
+    for (const [fileName, xml] of worksheets) {
+      // 如果指定了目标工作表，可以在这里过滤
+      // 目前先处理所有工作表
 
-    for (const p of paths) {
-      const entry = zip.file(p);
-      if (entry) {
-        const data = await entry.async("nodebuffer");
-        return data;
+      // 查找包含 DISPIMG 公式的单元格
+      const cellRegex = /<c[^>]*r="([^"]*)"[^>]*>([\s\S]*?)<\/c>/g;
+      let match;
+
+      while ((match = cellRegex.exec(xml)) !== null) {
+        const cellRef = match[1];
+        const cellContent = match[2];
+
+        // 查找 DISPIMG 公式
+        const formulaMatch = cellContent.match(/<f[^>]*>(.*?DISPIMG.*?)<\/f>/);
+        if (formulaMatch) {
+          const formula = formulaMatch[1];
+
+          // 提取 DISPIMG 中的图片 ID
+          let idMatch = formula.match(/DISPIMG\(&quot;([^&]*?)&quot;,/);
+          if (!idMatch) {
+            idMatch = formula.match(/DISPIMG\("([^"]*?)",/);
+          }
+
+          if (idMatch) {
+            const dispimgId = idMatch[1];
+            
+            // 解析单元格引用
+            const cellMatch = cellRef.match(/^([A-Z]+)(\d+)$/);
+            if (cellMatch) {
+              const column = cellMatch[1];
+              const row = parseInt(cellMatch[2]);
+
+              if (!positionsMap.has(dispimgId)) {
+                positionsMap.set(dispimgId, []);
+              }
+
+              positionsMap.get(dispimgId)!.push({
+                position: cellRef,
+                row,
+                column,
+                type: column === "M" ? "门头" : column === "N" ? "内部" : "图片",
+              });
+            }
+          }
+        }
       }
     }
-    return null;
+
+    return positionsMap;
   }
 
   /**
@@ -247,138 +426,5 @@ export class WpsImageExtractor {
     }
 
     return results;
-  }
-
-  /**
-   * 获取目标工作表文件
-   */
-  private async getWorksheetFile(
-    zip: JSZip,
-    targetSheet?: string
-  ): Promise<string | null> {
-    if (!targetSheet) return null;
-
-    try {
-      const workbookXml = await this.readXmlEntry(zip, "xl/workbook.xml");
-      if (!workbookXml) return null;
-
-      const workbookRels = await this.readXmlEntry(zip, "xl/_rels/workbook.xml.rels");
-      if (!workbookRels) return null;
-
-      // 查找工作表 ID
-      const sheetRegex = /<sheet[^>]*name="([^"]*)"[^>]*r:id="([^"]*)"/g;
-      let match;
-
-      while ((match = sheetRegex.exec(workbookXml)) !== null) {
-        const sheetName = match[1];
-        const rId = match[2];
-
-        if (sheetName === targetSheet) {
-          // 从关系文件中查找实际文件名
-          const relRegex = new RegExp(
-            `<Relationship[^>]*Id="${rId}"[^>]*Target="([^"]*)"`,
-            "g"
-          );
-          const relMatch = relRegex.exec(workbookRels);
-          if (relMatch) {
-            const target = relMatch[1];
-            // target 格式: "worksheets/sheet1.xml"
-            return `xl/${target}`;
-          }
-        }
-      }
-    } catch (error) {
-      console.error("获取工作表文件失败:", error);
-    }
-
-    return null;
-  }
-
-  /**
-   * 从 DISPIMG 公式获取图片的所有位置（支持同一图片多次引用）
-   */
-  private async getAllPositionsFromDISPIMG(
-    zip: JSZip,
-    dispimgId: string,
-    worksheetFile: string | null
-  ): Promise<
-    Array<{
-      position: string;
-      row: number;
-      column: string;
-      type: string;
-    }>
-  > {
-    const positions: Array<{
-      position: string;
-      row: number;
-      column: string;
-      type: string;
-    }> = [];
-
-    try {
-      // 获取所有工作表文件
-      let worksheetFiles: string[] = [];
-      
-      zip.forEach((relativePath, file) => {
-        if (relativePath.startsWith("xl/worksheets/") && relativePath.endsWith(".xml")) {
-          worksheetFiles.push(relativePath);
-        }
-      });
-
-      // 如果指定了特定工作表，只搜索该工作表
-      if (worksheetFile) {
-        worksheetFiles = worksheetFiles.filter((f) => f === worksheetFile);
-      }
-
-      for (const wsFile of worksheetFiles) {
-        const wsXml = await this.readXmlEntry(zip, wsFile);
-        if (!wsXml) continue;
-
-        // 查找包含目标 dispimgId 的 DISPIMG 公式
-        const cellRegex = /<c[^>]*r="([^"]*)"[^>]*>([\s\S]*?)<\/c>/g;
-        let match;
-
-        while ((match = cellRegex.exec(wsXml)) !== null) {
-          const cellRef = match[1];
-          const cellContent = match[2];
-
-          // 查找 DISPIMG 公式
-          const formulaMatch = cellContent.match(
-            /<f[^>]*>(.*?DISPIMG.*?)<\/f>/
-          );
-          if (formulaMatch) {
-            const formula = formulaMatch[1];
-
-            // 提取 DISPIMG 中的图片 ID
-            let idMatch = formula.match(/DISPIMG\(&quot;([^&]*?)&quot;,/);
-            if (!idMatch) {
-              idMatch = formula.match(/DISPIMG\("([^"]*?)",/);
-            }
-
-            if (idMatch && idMatch[1] === dispimgId) {
-              // 解析单元格引用
-              const cellMatch = cellRef.match(/^([A-Z]+)(\d+)$/);
-              if (cellMatch) {
-                const column = cellMatch[1];
-                const row = parseInt(cellMatch[2]);
-
-                positions.push({
-                  position: cellRef,
-                  row,
-                  column,
-                  type:
-                    column === "M" ? "门头" : column === "N" ? "内部" : "图片",
-                });
-              }
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.error("从 DISPIMG 公式获取位置失败:", error);
-    }
-
-    return positions;
   }
 }
