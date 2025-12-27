@@ -31,23 +31,7 @@ function App() {
     clearResult,
   } = useElectronValidation();
 
-  // 显示口令码验证界面
-  if (!isAuthenticated) {
-    return <PasscodeScreen onSuccess={() => setIsAuthenticated(true)} />;
-  }
-
-  const availableTasks = Object.keys(TASK_TEMPLATES);
-
-  const handleSelectFile = async () => {
-    const filePath = await selectFile();
-    if (filePath) {
-      setSelectedFile(filePath);
-      setSelectedSheet(undefined);
-      clearResult();
-    }
-  };
-
-  // 拖拽事件处理
+  // 拖拽事件处理 - 必须在任何条件返回之前定义
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -85,6 +69,22 @@ function App() {
       }
     }
   }, [clearResult]);
+
+  // 显示口令码验证界面
+  if (!isAuthenticated) {
+    return <PasscodeScreen onSuccess={() => setIsAuthenticated(true)} />;
+  }
+
+  const availableTasks = Object.keys(TASK_TEMPLATES);
+
+  const handleSelectFile = async () => {
+    const filePath = await selectFile();
+    if (filePath) {
+      setSelectedFile(filePath);
+      setSelectedSheet(undefined);
+      clearResult();
+    }
+  };
 
   const handleValidate = async () => {
     if (!selectedFile) return;
