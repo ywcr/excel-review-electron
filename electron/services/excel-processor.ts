@@ -22,7 +22,7 @@ export class ExcelStreamProcessor {
     this.isCancelled = false;
 
     console.log("🚀 [验证开始]", { filePath, taskName, sheetName });
-    onProgress?.(0, "正在打开文件...");
+    onProgress?.(0, "[1/6] 正在打开文件...");
 
     const template = TASK_TEMPLATES[taskName];
     if (!template) {
@@ -45,7 +45,7 @@ export class ExcelStreamProcessor {
       worksheets: "emit",
     });
 
-    onProgress?.(10, "正在解析 Excel 结构...");
+    onProgress?.(10, "[2/6] 正在解析 Excel 结构...");
 
     const errors: any[] = [];
     let totalRows = 0;
@@ -107,7 +107,7 @@ export class ExcelStreamProcessor {
       
       console.log(`✅ [工作表选中] 开始处理: "${currentSheetName}"`);
 
-      onProgress?.(20, `正在处理工作表: ${currentSheetName}`);
+      onProgress?.(20, `[2/6] 正在处理工作表: ${currentSheetName}`);
 
       // 遍历行查找表头
       let foundHeader = false;
@@ -148,7 +148,7 @@ export class ExcelStreamProcessor {
             headerRow = rowData;
             headerRowIndex = rowIndex;
             foundHeader = true; // Set foundHeader to true
-            onProgress?.(30, "找到表头，开始验证数据...");
+            onProgress?.(30, "[3/6] 找到表头，开始验证数据...");
             console.log("📋 [表头识别]", {
               sheet: currentSheetName,
               headerRowIndex,
@@ -187,7 +187,7 @@ export class ExcelStreamProcessor {
             const estimatedTotal = Math.max(totalRows * 1.2, 100); // 预估总行数
             const rowProgress = Math.min((totalRows / estimatedTotal) * 40, 40); // 最多 40%
             const progress = Math.min(30 + rowProgress, 70);
-            onProgress?.(progress, `正在验证第 ${totalRows} 行...`);
+            onProgress?.(progress, `[3/6] 正在验证第 ${totalRows} 行...`);
             console.log(`📊 [数据处理] 已验证 ${totalRows} 行，当前错误数: ${errors.length}`);
           }
         }
@@ -233,7 +233,7 @@ export class ExcelStreamProcessor {
         )
       ).length,
     });
-    onProgress?.(70, "正在执行跨行验证...");
+    onProgress?.(70, "[3/6] 正在执行跨行验证...");
 
     // 执行跨行验证
     const crossRowErrors = validator.validateCrossRows(
@@ -268,7 +268,7 @@ export class ExcelStreamProcessor {
     });
 
     // 使用 yauzl 流式读取，支持超大文件
-    onProgress?.(75, fileSizeGB > 1 ? `正在验证图片 (${fileSizeGB.toFixed(1)}GB 大文件)...` : "正在验证图片...");
+    onProgress?.(75, fileSizeGB > 1 ? `[4/6] 正在验证图片 (${fileSizeGB.toFixed(1)}GB 大文件)...` : "[4/6] 正在验证图片...");
 
     const imageValidationStartTime = Date.now();
     try {
@@ -303,7 +303,7 @@ export class ExcelStreamProcessor {
       // 图片验证失败不阻止整体验证
     }
 
-    onProgress?.(95, "正在生成验证报告...");
+    onProgress?.(95, "[6/6] 正在生成验证报告...");
 
     // 按行号排序错误
     errors.sort((a, b) => a.row - b.row);
@@ -318,7 +318,7 @@ export class ExcelStreamProcessor {
       isValid: errors.length === 0 && imageErrors.length === 0,
     });
 
-    onProgress?.(100, "验证完成");
+    onProgress?.(100, "✅ 验证完成");
 
     return {
       isValid: errors.length === 0 && imageErrors.length === 0,
@@ -385,7 +385,7 @@ export class ExcelStreamProcessor {
         
         // ========== 阶段一：顺序计算哈希（重复检测需要顺序性）==========
         console.log(`📷 [阶段一] 开始计算 ${wpsImages.length} 张图片的哈希...`);
-        onProgress?.(76, `正在计算图片哈希 (0/${wpsImages.length})...`);
+        onProgress?.(76, `[4/6] 正在计算图片哈希 (0/${wpsImages.length})...`);
         
         const imagesWithPosition = wpsImages.map((img, i) => ({
           buffer: img.buffer,
@@ -398,7 +398,7 @@ export class ExcelStreamProcessor {
           (current, total) => {
             if (current % 10 === 0 || current === total) {
               const hashProgress = 76 + Math.floor((current / total) * 8); // 76-84%
-              onProgress?.(hashProgress, `正在计算图片哈希 (${current}/${total})...`);
+              onProgress?.(hashProgress, `[4/6] 正在计算图片哈希 (${current}/${total})...`);
             }
           }
         );
@@ -407,7 +407,7 @@ export class ExcelStreamProcessor {
         
         // ========== 阶段二：并行验证分析（模糊检测、边框检测、可疑度评分）==========
         console.log(`📷 [阶段二] 开始并行验证 ${wpsImages.length} 张图片...`);
-        onProgress?.(84, `正在并行验证图片 (0/${wpsImages.length})...`);
+        onProgress?.(84, `[5/6] 正在并行验证图片 (0/${wpsImages.length})...`);
         
         // 根据 CPU 核心数自适应并发数（最小4，最大12）
         const os = await import("os");
@@ -440,7 +440,7 @@ export class ExcelStreamProcessor {
               completedCount++;
               if (completedCount % 10 === 0 || completedCount === wpsImages.length) {
                 const analysisProgress = 84 + Math.floor((completedCount / wpsImages.length) * 11); // 84-95%
-                onProgress?.(analysisProgress, `已验证 ${completedCount}/${wpsImages.length} 张图片`);
+                onProgress?.(analysisProgress, `[5/6] 已验证 ${completedCount}/${wpsImages.length} 张图片`);
               }
               
               return { index: i, img, result, thumbnail };
