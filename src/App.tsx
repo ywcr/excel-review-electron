@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useElectronValidation } from "./hooks/useElectronValidation";
 import { ValidationResults } from "./components/ValidationResults";
 import { BatchValidation } from "./components/BatchValidation";
@@ -18,6 +18,7 @@ function App() {
   const [selectedSheet, setSelectedSheet] = useState<string | undefined>(
     undefined
   );
+  const [isDragging, setIsDragging] = useState(false);
 
   const {
     isValidating,
@@ -45,6 +46,45 @@ function App() {
       clearResult();
     }
   };
+
+  // 拖拽事件处理
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      const file = files[0];
+      // 检查是否是 Excel 文件
+      if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+        // Electron 中可以通过 path 属性获取文件路径
+        const filePath = (file as any).path;
+        if (filePath) {
+          setSelectedFile(filePath);
+          setSelectedSheet(undefined);
+          clearResult();
+        }
+      }
+    }
+  }, [clearResult]);
 
   const handleValidate = async () => {
     if (!selectedFile) return;
@@ -129,28 +169,60 @@ function App() {
             </div>
           </section>
 
-          {/* 文件选择卡片 */}
+          {/* 文件选择卡片 - 支持拖拽 */}
           <section className="bg-white rounded-lg border border-zinc-200 p-6 shadow-sm hover:shadow-md transition-shadow duration-200">
             <h2 className="text-sm font-bold text-zinc-900 mb-4 flex items-center gap-2">
               <span className="w-1 h-4 bg-black rounded-full"></span>
               2. Excel 文件
             </h2>
-            <div className="flex flex-col gap-4">
-              <GhostButton 
-                onClick={handleSelectFile} 
-                disabled={isValidating}
-                className="w-full justify-center border border-zinc-200 hover:border-zinc-300"
-              >
-                {selectedFile ? "更换文件" : "选择 Excel 文件..."}
-              </GhostButton>
-              
-              {selectedFile && (
-                <div className="bg-zinc-50 rounded-md p-3 border border-zinc-100 flex items-center gap-3">
-                  <div className="text-2xl">📄</div>
+            <div 
+              className={`
+                flex flex-col gap-4 p-6 rounded-lg border-2 border-dashed transition-all duration-200
+                ${isDragging 
+                  ? 'border-blue-500 bg-blue-50' 
+                  : 'border-zinc-300 hover:border-zinc-400'
+                }
+                ${isValidating ? 'opacity-50 pointer-events-none' : ''}
+              `}
+              onDragEnter={handleDragEnter}
+              onDragLeave={handleDragLeave}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+            >
+              {selectedFile ? (
+                <div className="flex items-center gap-3">
+                  <div className="text-3xl">📄</div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold text-zinc-900 truncate">{fileName}</p>
                     <p className="text-xs text-zinc-500 truncate font-mono">{selectedFile}</p>
                   </div>
+                  <GhostButton 
+                    onClick={handleSelectFile}
+                    disabled={isValidating}
+                    className="shrink-0"
+                  >
+                    更换
+                  </GhostButton>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-3 py-4">
+                  <div className={`text-4xl transition-transform ${isDragging ? 'scale-110' : ''}`}>
+                    {isDragging ? '📥' : '📁'}
+                  </div>
+                  <div className="text-center">
+                    <p className="text-sm font-medium text-zinc-700">
+                      {isDragging ? '松开鼠标上传文件' : '拖拽 Excel 文件到此处'}
+                    </p>
+                    <p className="text-xs text-zinc-500 mt-1">或</p>
+                  </div>
+                  <GhostButton 
+                    onClick={handleSelectFile}
+                    disabled={isValidating}
+                    className="border border-zinc-200 hover:border-zinc-300"
+                  >
+                    选择文件...
+                  </GhostButton>
+                  <p className="text-xs text-zinc-400">支持 .xlsx 和 .xls 格式</p>
                 </div>
               )}
             </div>
