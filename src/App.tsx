@@ -73,7 +73,6 @@ function App() {
         name: file.name,
         size: file.size,
         type: file.type,
-        path: (file as any).path,
       });
       
       // 检查是否是 Excel 文件
@@ -83,17 +82,19 @@ function App() {
         return;
       }
       
-      // Electron 中可以通过 path 属性获取文件路径
-      const filePath = (file as any).path;
-      console.log('[拖拽上传] 文件路径:', filePath);
-      
-      if (filePath) {
-        setSelectedFile(filePath);
-        setSelectedSheet(undefined);
-        clearResult();
-        console.log('[拖拽上传] 文件已设置:', filePath);
-      } else {
-        console.error('[拖拽上传] 无法获取文件路径 - Electron 环境可能未正确配置');
+      // 使用 Electron 的 webUtils.getPathForFile 获取文件路径
+      try {
+        const filePath = window.electron.getPathForFile(file);
+        console.log('[拖拽上传] 文件路径:', filePath);
+        
+        if (filePath) {
+          setSelectedFile(filePath);
+          setSelectedSheet(undefined);
+          clearResult();
+          console.log('[拖拽上传] 文件已设置:', filePath);
+        }
+      } catch (err) {
+        console.error('[拖拽上传] 获取文件路径失败:', err);
       }
     }
   }, [clearResult]);

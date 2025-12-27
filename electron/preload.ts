@@ -1,6 +1,9 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 const electronAPI = {
+  // 从拖拽的文件获取路径（用于拖拽上传）
+  getPathForFile: (file: File) => webUtils.getPathForFile(file),
+  
   // 选择单个文件
   selectFile: () => ipcRenderer.invoke("select-file"),
 

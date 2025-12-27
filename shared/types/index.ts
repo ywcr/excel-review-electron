@@ -111,6 +111,7 @@ export interface TaskTemplate {
 declare global {
   interface Window {
     electron: {
+      getPathForFile: (file: File) => string;
       selectFile: () => Promise<string | null>;
       selectMultipleFiles: () => Promise<string[]>;
       getExcelSheets: (filePath: string) => Promise<{ sheets: string[]; error?: string }>;
