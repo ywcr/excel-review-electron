@@ -252,60 +252,53 @@ export class ExcelStreamProcessor {
     let imageValidationSkipped = false;
     let imageValidationSkipReason = "";
 
-    // 检查文件大小，超过 2GB 跳过图片验证
+    // 获取文件大小信息用于日志
     const fs = await import("fs");
     const fileStats = fs.statSync(filePath);
-    const fileSizeGB = fileStats.size / (1024 * 1024 * 1024);
-    const MAX_FILE_SIZE_GB = 2;
+    const fileSizeMB = fileStats.size / (1024 * 1024);
+    const fileSizeGB = fileSizeMB / 1024;
     
     console.log("🖼️ [图片验证开始]", {
       filePath,
       targetWorksheet,
-      fileSizeMB: (fileStats.size / (1024 * 1024)).toFixed(2),
+      fileSizeMB: fileSizeMB.toFixed(2),
       fileSizeGB: fileSizeGB.toFixed(2),
       timestamp: new Date().toISOString(),
     });
 
-    if (fileSizeGB >= MAX_FILE_SIZE_GB) {
-      imageValidationSkipped = true;
-      imageValidationSkipReason = `文件过大 (${fileSizeGB.toFixed(2)}GB)，超过 ${MAX_FILE_SIZE_GB}GB 限制，跳过图片验证`;
-      console.log("⚠️ [图片验证跳过]", imageValidationSkipReason);
-      onProgress?.(95, imageValidationSkipReason);
-    } else {
-      onProgress?.(75, "正在验证图片...");
+    onProgress?.(75, "正在验证图片...");
 
-      const imageValidationStartTime = Date.now();
-      try {
-        console.log("🖼️ [图片验证] 创建 ImageValidator...");
-        const imageValidator = new ImageValidator();
-        
-        console.log("🖼️ [图片验证] 开始调用 validateImages...");
-        const imageResults = await this.validateImages(
-          filePath,
-          targetWorksheet,
-          imageValidator,
-          onProgress
-        );
-        
-        const imageValidationDuration = Date.now() - imageValidationStartTime;
-        console.log("✅ [图片验证完成]", {
-          ...imageResults.stats,
-          errorsFound: imageResults.errors.length,
-          durationMs: imageValidationDuration,
-        });
-        
-        imageErrors.push(...imageResults.errors);
-        imageStats = imageResults.stats;
-      } catch (error) {
-        const imageValidationDuration = Date.now() - imageValidationStartTime;
-        console.error("❌ [图片验证失败]:", {
-          error,
-          durationMs: imageValidationDuration,
-          message: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : undefined,
-        });
-        // 图片验证失败不阻止整体验证
-      }
+    const imageValidationStartTime = Date.now();
+    try {
+      console.log("🖼️ [图片验证] 创建 ImageValidator...");
+      const imageValidator = new ImageValidator();
+      
+      console.log("🖼️ [图片验证] 开始调用 validateImages...");
+      const imageResults = await this.validateImages(
+        filePath,
+        targetWorksheet,
+        imageValidator,
+        onProgress
+      );
+      
+      const imageValidationDuration = Date.now() - imageValidationStartTime;
+      console.log("✅ [图片验证完成]", {
+        ...imageResults.stats,
+        errorsFound: imageResults.errors.length,
+        durationMs: imageValidationDuration,
+      });
+      
+      imageErrors.push(...imageResults.errors);
+      imageStats = imageResults.stats;
+    } catch (error) {
+      const imageValidationDuration = Date.now() - imageValidationStartTime;
+      console.error("❌ [图片验证失败]:", {
+        error,
+        durationMs: imageValidationDuration,
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      // 图片验证失败不阻止整体验证
     }
 
     onProgress?.(95, "正在生成验证报告...");

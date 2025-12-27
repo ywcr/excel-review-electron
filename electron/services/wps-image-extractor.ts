@@ -1,7 +1,8 @@
-import AdmZip from "adm-zip";
+import JSZip from 'jszip';
+import * as fs from 'fs';
 
 /**
- * WPS 图片提取器
+ * WPS 图片提取器 (支持大文件流式处理)
  * 从 WPS Excel 文件中提取 DISPIMG 格式的图片
  */
 export class WpsImageExtractor {
@@ -34,18 +35,21 @@ export class WpsImageExtractor {
     }> = [];
 
     try {
-      const zip = new AdmZip(filePath);
-      const zipEntries = zip.getEntries();
+      console.log("📷 [WPS提取] 使用 JSZip 流式读取文件...");
+      
+      // 使用流式读取文件来支持大文件
+      const fileBuffer = await this.readFileInChunks(filePath);
+      const zip = await JSZip.loadAsync(fileBuffer);
 
       // 读取 cellimages.xml
-      const cellimagesXml = this.readXmlEntry(zip, "xl/cellimages.xml");
+      const cellimagesXml = await this.readXmlEntry(zip, "xl/cellimages.xml");
       if (!cellimagesXml) {
         console.log("📷 [WPS提取] 未找到 cellimages.xml，非 WPS 格式");
         return images;
       }
 
       // 读取 cellimages.xml.rels
-      const cellimagesRels = this.readXmlEntry(
+      const cellimagesRels = await this.readXmlEntry(
         zip,
         "xl/_rels/cellimages.xml.rels"
       );
@@ -93,7 +97,7 @@ export class WpsImageExtractor {
         }
 
         // 读取图片数据
-        const imageBuffer = this.readMediaFile(zip, mediaFile);
+        const imageBuffer = await this.readMediaFile(zip, mediaFile);
         if (!imageBuffer) continue;
 
         // 为每个引用位置创建一个图片条目
@@ -131,25 +135,58 @@ export class WpsImageExtractor {
   }
 
   /**
+   * 分块读取大文件 (支持 >2GB 文件)
+   */
+  private async readFileInChunks(filePath: string): Promise<Buffer> {
+    const stats = fs.statSync(filePath);
+    const fileSizeGB = stats.size / (1024 * 1024 * 1024);
+    
+    console.log(`📷 [WPS提取] 文件大小: ${(stats.size / (1024 * 1024)).toFixed(2)} MB`);
+    
+    // 对于特别大的文件，使用流式读取
+    if (fileSizeGB > 1) {
+      console.log(`📷 [WPS提取] 大文件模式，使用流式读取...`);
+      return new Promise((resolve, reject) => {
+        const chunks: Buffer[] = [];
+        const stream = fs.createReadStream(filePath);
+        
+        stream.on('data', (chunk: Buffer) => {
+          chunks.push(chunk);
+        });
+        
+        stream.on('end', () => {
+          resolve(Buffer.concat(chunks));
+        });
+        
+        stream.on('error', reject);
+      });
+    }
+    
+    // 小文件直接读取
+    return fs.promises.readFile(filePath);
+  }
+
+  /**
    * 读取 ZIP 中的 XML 文件
    */
-  private readXmlEntry(zip: AdmZip, entryName: string): string | null {
-    const entry = zip.getEntry(entryName);
+  private async readXmlEntry(zip: JSZip, entryName: string): Promise<string | null> {
+    const entry = zip.file(entryName);
     if (!entry) return null;
-    return entry.getData().toString("utf8");
+    return entry.async("string");
   }
 
   /**
    * 读取媒体文件
    */
-  private readMediaFile(zip: AdmZip, mediaFile: string): Buffer | null {
+  private async readMediaFile(zip: JSZip, mediaFile: string): Promise<Buffer | null> {
     // 尝试多种路径格式
     const paths = [`xl/media/${mediaFile}`, `xl/${mediaFile}`, mediaFile];
 
     for (const p of paths) {
-      const entry = zip.getEntry(p);
+      const entry = zip.file(p);
       if (entry) {
-        return entry.getData();
+        const data = await entry.async("nodebuffer");
+        return data;
       }
     }
     return null;
@@ -216,16 +253,16 @@ export class WpsImageExtractor {
    * 获取目标工作表文件
    */
   private async getWorksheetFile(
-    zip: AdmZip,
+    zip: JSZip,
     targetSheet?: string
   ): Promise<string | null> {
     if (!targetSheet) return null;
 
     try {
-      const workbookXml = this.readXmlEntry(zip, "xl/workbook.xml");
+      const workbookXml = await this.readXmlEntry(zip, "xl/workbook.xml");
       if (!workbookXml) return null;
 
-      const workbookRels = this.readXmlEntry(zip, "xl/_rels/workbook.xml.rels");
+      const workbookRels = await this.readXmlEntry(zip, "xl/_rels/workbook.xml.rels");
       if (!workbookRels) return null;
 
       // 查找工作表 ID
@@ -261,7 +298,7 @@ export class WpsImageExtractor {
    * 从 DISPIMG 公式获取图片的所有位置（支持同一图片多次引用）
    */
   private async getAllPositionsFromDISPIMG(
-    zip: AdmZip,
+    zip: JSZip,
     dispimgId: string,
     worksheetFile: string | null
   ): Promise<
@@ -281,14 +318,13 @@ export class WpsImageExtractor {
 
     try {
       // 获取所有工作表文件
-      let worksheetFiles = zip
-        .getEntries()
-        .filter(
-          (e) =>
-            e.entryName.startsWith("xl/worksheets/") &&
-            e.entryName.endsWith(".xml")
-        )
-        .map((e) => e.entryName);
+      let worksheetFiles: string[] = [];
+      
+      zip.forEach((relativePath, file) => {
+        if (relativePath.startsWith("xl/worksheets/") && relativePath.endsWith(".xml")) {
+          worksheetFiles.push(relativePath);
+        }
+      });
 
       // 如果指定了特定工作表，只搜索该工作表
       if (worksheetFile) {
@@ -296,7 +332,7 @@ export class WpsImageExtractor {
       }
 
       for (const wsFile of worksheetFiles) {
-        const wsXml = this.readXmlEntry(zip, wsFile);
+        const wsXml = await this.readXmlEntry(zip, wsFile);
         if (!wsXml) continue;
 
         // 查找包含目标 dispimgId 的 DISPIMG 公式
@@ -344,26 +380,5 @@ export class WpsImageExtractor {
     }
 
     return positions;
-  }
-
-  /**
-   * 从 DISPIMG 公式获取图片位置（兼容方法，返回第一个匹配）
-   */
-  private async getPositionFromDISPIMG(
-    zip: AdmZip,
-    dispimgId: string,
-    worksheetFile: string | null
-  ): Promise<{
-    position: string;
-    row: number;
-    column: string;
-    type: string;
-  } | null> {
-    const positions = await this.getAllPositionsFromDISPIMG(
-      zip,
-      dispimgId,
-      worksheetFile
-    );
-    return positions.length > 0 ? positions[0] : null;
   }
 }
