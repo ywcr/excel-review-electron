@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useElectronValidation } from "./hooks/useElectronValidation";
 import { ValidationResults } from "./components/ValidationResults";
 import { BatchValidation } from "./components/BatchValidation";
@@ -31,17 +31,26 @@ function App() {
     clearResult,
   } = useElectronValidation();
 
+  // 拖拽计数器，用于正确处理子元素的 dragEnter/dragLeave
+  const dragCounter = useRef(0);
+
   // 拖拽事件处理 - 必须在任何条件返回之前定义
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsDragging(true);
+    dragCounter.current++;
+    if (dragCounter.current === 1) {
+      setIsDragging(true);
+    }
   }, []);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsDragging(false);
+    dragCounter.current--;
+    if (dragCounter.current === 0) {
+      setIsDragging(false);
+    }
   }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -52,6 +61,7 @@ function App() {
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    dragCounter.current = 0; // 重置计数器
     setIsDragging(false);
 
     const files = e.dataTransfer.files;
