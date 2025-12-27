@@ -169,11 +169,15 @@ export class ExcelStreamProcessor {
 
           totalRows++;
 
-          // 定期更新进度（每 50 行更新一次）
-          if (totalRows % 50 === 0) {
+          // 更频繁地更新进度（每 20 行或前 100 行每 10 行更新一次）
+          const updateInterval = totalRows <= 100 ? 10 : 20;
+          if (totalRows % updateInterval === 0) {
             // 行验证占 30-70%，使用更平滑的进度计算
-            const progress = Math.min(30 + Math.sqrt(totalRows) * 2, 70);
-            onProgress?.(progress, `已验证 ${totalRows} 行`);
+            // 假设平均文件有 500 行，动态适应
+            const estimatedTotal = Math.max(totalRows * 1.2, 100); // 预估总行数
+            const rowProgress = Math.min((totalRows / estimatedTotal) * 40, 40); // 最多 40%
+            const progress = Math.min(30 + rowProgress, 70);
+            onProgress?.(progress, `正在验证第 ${totalRows} 行...`);
             console.log(`📊 [数据处理] 已验证 ${totalRows} 行，当前错误数: ${errors.length}`);
           }
         }
