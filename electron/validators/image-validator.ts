@@ -125,6 +125,103 @@ export class ImageValidator {
   }
 
   /**
+   * 阶段一：预计算所有图片的哈希（必须顺序执行以保证重复检测正确）
+   * @returns 返回哈希数组，索引与图片索引对应
+   */
+  async precomputeHashes(
+    images: Array<{ buffer: Buffer; position?: string }>,
+    onProgress?: (current: number, total: number) => void
+  ): Promise<string[]> {
+    const hashes: string[] = [];
+    
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i];
+      
+      // 存储位置映射
+      if (img.position) {
+        this.imagePositions.set(i, img.position);
+      }
+      
+      // 计算哈希
+      const hashResult = await calculateBlockhash(
+        img.buffer,
+        this.BLOCKHASH_BITS
+      );
+      const hash = hashResult.hash;
+      this.imageHashes.set(i, hash);
+      hashes.push(hash);
+      
+      onProgress?.(i + 1, images.length);
+    }
+    
+    return hashes;
+  }
+
+  /**
+   * 阶段二：并行验证图片（假设哈希已通过 precomputeHashes 计算完毕）
+   * @param imageBuffer 图片 Buffer
+   * @param imageIndex 图片索引
+   * @param precomputedHash 已预计算的哈希
+   * @returns 验证结果
+   */
+  async validateImageWithPrecomputedHash(
+    imageBuffer: Buffer,
+    imageIndex: number,
+    precomputedHash: string
+  ): Promise<ImageValidationResult> {
+    // 1. 并行执行：元数据获取、模糊检测、边框检测
+    const [metadata, blurScore, borderResult] = await Promise.all([
+      this.imageProcessor.getImageMetadata(imageBuffer),
+      this.imageProcessor.detectBlur(imageBuffer),
+      this.imageProcessor.detectBorder(imageBuffer),
+    ]);
+
+    if (!metadata) {
+      throw new Error("Failed to read image metadata");
+    }
+
+    const isBlurry = blurScore < this.BLUR_THRESHOLD;
+
+    // 2. 检测重复（使用预计算的哈希）
+    const duplicateResult = this.checkDuplicate(precomputedHash, imageIndex);
+
+    // 3. 可疑度评分
+    const suspicionResult = this.calculateSuspicionScore({
+      width: metadata.width,
+      height: metadata.height,
+      megapixels: metadata.megapixels,
+      mimeType: `image/${metadata.format}`,
+      sizeBytes: metadata.size,
+      exif: metadata.exif,
+      hasBorder: borderResult.hasBorder,
+      borderSides: borderResult.borderSides,
+      borderWidth: borderResult.borderWidth,
+      hasWatermark: false,
+      watermarkRegions: [],
+      watermarkConfidence: 0,
+    });
+
+    return {
+      isBlurry,
+      blurScore,
+      isDuplicate: duplicateResult.isDuplicate,
+      duplicateOf: duplicateResult.duplicateOf,
+      duplicateOfPosition: duplicateResult.duplicateOfPosition,
+      suspicionScore: suspicionResult.suspicionScore,
+      suspicionLevel: suspicionResult.suspicionLevel,
+      suspicionLabel: suspicionResult.suspicionLabel,
+      suspicionFactors: suspicionResult.factors,
+      metadata: {
+        width: metadata.width,
+        height: metadata.height,
+        format: metadata.format,
+        size: metadata.size,
+        megapixels: metadata.megapixels,
+      },
+    };
+  }
+
+  /**
    * 检测图片是否重复
    * 使用与 PC Worker 一致的十六进制汉明距离算法
    */

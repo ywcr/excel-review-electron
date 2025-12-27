@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import pLimit from "p-limit";
 import type {
   ValidationResult,
   TaskTemplate,
@@ -381,114 +382,137 @@ export class ExcelStreamProcessor {
           `📷 [图片验证] WPS 格式提取成功，发现 ${wpsImages.length} 张图片`
         );
         stats.totalImages = wpsImages.length;
-        onProgress?.(
-          76,
-          `发现 ${wpsImages.length} 张 WPS 格式图片，正在验证...`
+        
+        // ========== 阶段一：顺序计算哈希（重复检测需要顺序性）==========
+        console.log(`📷 [阶段一] 开始计算 ${wpsImages.length} 张图片的哈希...`);
+        onProgress?.(76, `正在计算图片哈希 (0/${wpsImages.length})...`);
+        
+        const imagesWithPosition = wpsImages.map((img, i) => ({
+          buffer: img.buffer,
+          position: `行${img.row} 列${img.column}`,
+        }));
+        
+        const hashStartTime = Date.now();
+        const hashes = await imageValidator.precomputeHashes(
+          imagesWithPosition,
+          (current, total) => {
+            if (current % 10 === 0 || current === total) {
+              const hashProgress = 76 + Math.floor((current / total) * 8); // 76-84%
+              onProgress?.(hashProgress, `正在计算图片哈希 (${current}/${total})...`);
+            }
+          }
         );
-
-        // 验证 WPS 图片
-        for (let i = 0; i < wpsImages.length; i++) {
-          const img = wpsImages[i];
-
-          // 添加位置日志，特别关注 PC 标记的重复位置
-          const isTargetPosition = [
-            "M8",
-            "N11",
-            "N8",
-            "M10",
-            "M4",
-            "N4",
-            "M5",
-          ].includes(img.position);
-          if (i < 10 || isTargetPosition) {
-            console.log(
-              `📷 [图片位置] #${i}: ${img.position} (行${img.row}, 列${
-                img.column
-              }) ${isTargetPosition ? "⭐ PC重复位置" : ""}`
-            );
+        const hashDuration = Date.now() - hashStartTime;
+        console.log(`📷 [阶段一完成] 哈希计算耗时: ${hashDuration}ms`);
+        
+        // ========== 阶段二：并行验证分析（模糊检测、边框检测、可疑度评分）==========
+        console.log(`📷 [阶段二] 开始并行验证 ${wpsImages.length} 张图片...`);
+        onProgress?.(84, `正在并行验证图片 (0/${wpsImages.length})...`);
+        
+        const CONCURRENCY = 6; // 并发数
+        const limit = pLimit(CONCURRENCY);
+        const analysisStartTime = Date.now();
+        
+        let completedCount = 0;
+        
+        // 创建并行任务
+        const validationTasks = wpsImages.map((img, i) => 
+          limit(async () => {
+            try {
+              const result = await imageValidator.validateImageWithPrecomputedHash(
+                img.buffer,
+                i,
+                hashes[i]
+              );
+              
+              // 如果有问题，生成缩略图
+              let thumbnail: { data: string; mimeType: string } | null = null;
+              const hasError = result.isBlurry || result.isDuplicate || result.suspicionScore >= 40;
+              if (hasError) {
+                thumbnail = await imageValidator.imageProcessor.createThumbnail(img.buffer);
+              }
+              
+              // 更新进度
+              completedCount++;
+              if (completedCount % 10 === 0 || completedCount === wpsImages.length) {
+                const analysisProgress = 84 + Math.floor((completedCount / wpsImages.length) * 11); // 84-95%
+                onProgress?.(analysisProgress, `已验证 ${completedCount}/${wpsImages.length} 张图片`);
+              }
+              
+              return { index: i, img, result, thumbnail };
+            } catch (err) {
+              console.error(`验证第 ${i} 张 WPS 图片失败:`, err);
+              return null;
+            }
+          })
+        );
+        
+        // 等待所有任务完成
+        const results = await Promise.all(validationTasks);
+        const analysisDuration = Date.now() - analysisStartTime;
+        console.log(`📷 [阶段二完成] 并行验证耗时: ${analysisDuration}ms (并发数: ${CONCURRENCY})`);
+        
+        // 收集错误
+        for (const item of results) {
+          if (!item) continue;
+          
+          const { index: i, img, result, thumbnail } = item;
+          
+          if (result.isBlurry) {
+            stats.blurryImages++;
+            errors.push({
+              row: img.row,
+              column: img.column,
+              field: "图片",
+              imageIndex: i,
+              errorType: "blur",
+              message: `图片模糊 (清晰度: ${result.blurScore.toFixed(0)})`,
+              details: { blurScore: result.blurScore },
+              imageData: thumbnail?.data,
+              mimeType: thumbnail?.mimeType,
+            });
           }
 
-          try {
-            // 构建位置描述
-            const positionDesc = `行${img.row} 列${img.column}`;
-            const result = await imageValidator.validateImage(img.buffer, i, positionDesc);
+          if (result.isDuplicate) {
+            stats.duplicateImages++;
+            const duplicateOfDesc = result.duplicateOfPosition || `图片 #${result.duplicateOf}`;
+            errors.push({
+              row: img.row,
+              column: img.column,
+              field: "图片",
+              imageIndex: i,
+              errorType: "duplicate",
+              message: `重复图片 (与 ${duplicateOfDesc} 重复)`,
+              details: { 
+                duplicateOf: result.duplicateOf,
+                duplicateOfPosition: result.duplicateOfPosition,
+              },
+              imageData: thumbnail?.data,
+              mimeType: thumbnail?.mimeType,
+            });
+          }
 
-            // 为有问题的图片生成缩略图（用于预览）
-            let thumbnail: { data: string; mimeType: string } | null = null;
-            const hasError =
-              result.isBlurry ||
-              result.isDuplicate ||
-              result.suspicionScore >= 40;
-            if (hasError) {
-              thumbnail = await imageValidator.imageProcessor.createThumbnail(
-                img.buffer
-              );
-            }
-
-            if (result.isBlurry) {
-              stats.blurryImages++;
-              errors.push({
-                row: img.row,
-                column: img.column,
-                field: "图片",
-                imageIndex: i,
-                errorType: "blur",
-                message: `图片模糊 (清晰度: ${result.blurScore.toFixed(0)})`,
-                details: { blurScore: result.blurScore },
-                imageData: thumbnail?.data,
-                mimeType: thumbnail?.mimeType,
-              });
-            }
-
-            if (result.isDuplicate) {
-              stats.duplicateImages++;
-              const duplicateOfDesc = result.duplicateOfPosition || `图片 #${result.duplicateOf}`;
-              errors.push({
-                row: img.row,
-                column: img.column,
-                field: "图片",
-                imageIndex: i,
-                errorType: "duplicate",
-                message: `重复图片 (与 ${duplicateOfDesc} 重复)`,
-                details: { 
-                  duplicateOf: result.duplicateOf,
-                  duplicateOfPosition: result.duplicateOfPosition,
-                },
-                imageData: thumbnail?.data,
-                mimeType: thumbnail?.mimeType,
-              });
-            }
-
-            if (result.suspicionScore >= 40) {
-              stats.suspiciousImages++;
-              errors.push({
-                row: img.row,
-                column: img.column,
-                field: "图片",
-                imageIndex: i,
-                errorType: "suspicious",
-                message: `可疑图片 (${result.suspicionLabel}, 评分: ${result.suspicionScore})`,
-                details: {
-                  suspicionScore: result.suspicionScore,
-                  suspicionLevel: result.suspicionLevel,
-                },
-                imageData: thumbnail?.data,
-                mimeType: thumbnail?.mimeType,
-              });
-            }
-
-            // 更新进度（每 3 张或最后一张时更新，图片验证占 76-95%）
-            if ((i + 1) % 3 === 0 || i === wpsImages.length - 1) {
-              const imgProgress = 76 + Math.floor(((i + 1) / wpsImages.length) * 19);
-              onProgress?.(
-                imgProgress,
-                `已验证 ${i + 1}/${wpsImages.length} 张图片`
-              );
-            }
-          } catch (err) {
-            console.error(`验证第 ${i} 张 WPS 图片失败:`, err);
+          if (result.suspicionScore >= 40) {
+            stats.suspiciousImages++;
+            errors.push({
+              row: img.row,
+              column: img.column,
+              field: "图片",
+              imageIndex: i,
+              errorType: "suspicious",
+              message: `可疑图片 (${result.suspicionLabel}, 评分: ${result.suspicionScore})`,
+              details: {
+                suspicionScore: result.suspicionScore,
+                suspicionLevel: result.suspicionLevel,
+              },
+              imageData: thumbnail?.data,
+              mimeType: thumbnail?.mimeType,
+            });
           }
         }
+        
+        const totalDuration = hashDuration + analysisDuration;
+        console.log(`📷 [图片验证完成] 总耗时: ${totalDuration}ms, 哈希: ${hashDuration}ms, 分析: ${analysisDuration}ms`);
 
         // 输出 PC 检测到的重复位置信息
         console.log("\n📋 [位置汇总] PC 检测到的重复位置:");
