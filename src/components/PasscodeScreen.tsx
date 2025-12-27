@@ -6,27 +6,16 @@ interface PasscodeScreenProps {
 }
 
 const CORRECT_PASSCODE = "217664";
-const STORAGE_KEY = "excel-review-passcode-verified";
 
 export function PasscodeScreen({ onSuccess }: PasscodeScreenProps) {
   const [passcode, setPasscode] = React.useState("");
   const [error, setError] = React.useState("");
   const [shake, setShake] = React.useState(false);
 
-  // 检查是否已经验证过
-  React.useEffect(() => {
-    const verified = localStorage.getItem(STORAGE_KEY);
-    if (verified === "true") {
-      onSuccess();
-    }
-  }, [onSuccess]);
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
     if (passcode === CORRECT_PASSCODE) {
-      // 保存验证状态
-      localStorage.setItem(STORAGE_KEY, "true");
       onSuccess();
     } else {
       setError("口令码错误");
