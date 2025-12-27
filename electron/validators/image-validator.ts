@@ -17,6 +17,8 @@ export interface ImageValidationResult {
   blurScore: number;
   isDuplicate: boolean;
   duplicateOf?: number; // 重复的图片索引
+  /** 重复图片的位置，如 "行5 列M" */
+  duplicateOfPosition?: string;
   suspicionScore: number;
   suspicionLevel: string;
   suspicionLabel: string;
@@ -33,6 +35,7 @@ export interface ImageValidationResult {
 export class ImageValidator {
   public imageProcessor: ImageProcessor;
   private imageHashes: Map<number, string> = new Map(); // 存储已处理图片的哈希（十六进制格式）
+  private imagePositions: Map<number, string> = new Map(); // 存储图片位置映射
 
   // === 使用与 PC Worker 完全同步的配置 ===
   // 来源: electron/config/image-validation-config.ts
@@ -48,11 +51,19 @@ export class ImageValidator {
 
   /**
    * 验证单张图片
+   * @param imageBuffer 图片 Buffer
+   * @param imageIndex 图片索引
+   * @param position 可选的图片位置描述，如 "行5 列M"
    */
   async validateImage(
     imageBuffer: Buffer,
-    imageIndex: number
+    imageIndex: number,
+    position?: string
   ): Promise<ImageValidationResult> {
+    // 存储位置映射
+    if (position) {
+      this.imagePositions.set(imageIndex, position);
+    }
     // 1. 获取元数据
     const metadata = await this.imageProcessor.getImageMetadata(imageBuffer);
     if (!metadata) {
@@ -98,6 +109,7 @@ export class ImageValidator {
       blurScore,
       isDuplicate: duplicateResult.isDuplicate,
       duplicateOf: duplicateResult.duplicateOf,
+      duplicateOfPosition: duplicateResult.duplicateOfPosition,
       suspicionScore: suspicionResult.suspicionScore,
       suspicionLevel: suspicionResult.suspicionLevel,
       suspicionLabel: suspicionResult.suspicionLabel,
@@ -122,6 +134,7 @@ export class ImageValidator {
   ): {
     isDuplicate: boolean;
     duplicateOf?: number;
+    duplicateOfPosition?: string;
   } {
     // 添加调试日志
     if (currentIndex < 5) {
@@ -144,12 +157,15 @@ export class ImageValidator {
       }
 
       if (distance <= this.DUPLICATE_THRESHOLD) {
+        // 获取原始图片的位置信息
+        const duplicateOfPosition = this.imagePositions.get(index) || `图片 #${index + 1}`;
         console.log(
-          `📷 [重复检测] 发现重复! 图片 #${currentIndex} 与 #${index} 汉明距离: ${distance}`
+          `📷 [重复检测] 发现重复! 图片 #${currentIndex} 与 ${duplicateOfPosition} 重复，汉明距离: ${distance}`
         );
         return {
           isDuplicate: true,
           duplicateOf: index,
+          duplicateOfPosition,
         };
       }
     }

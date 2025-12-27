@@ -19,6 +19,8 @@ export interface ImageValidationError {
   details?: {
     blurScore?: number;
     duplicateOf?: number;
+    /** 重复图片的位置，如 "行5 列M" */
+    duplicateOfPosition?: string;
     suspicionScore?: number;
     suspicionLevel?: string;
   };

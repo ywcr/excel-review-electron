@@ -21,6 +21,8 @@ interface ImageValidationError {
   details?: {
     blurScore?: number;
     duplicateOf?: number;
+    /** 重复图片的位置，如 "行5 列M" */
+    duplicateOfPosition?: string;
     suspicionScore?: number;
     suspicionLevel?: string;
   };
@@ -398,7 +400,9 @@ export function ValidationResults({
                           <span className="text-xs text-zinc-400">清晰度: {err.details.blurScore.toFixed(1)}</span>
                         )}
                         {err.details?.duplicateOf !== undefined && (
-                          <span className="text-xs text-zinc-400">与图片 #{err.details.duplicateOf} 重复</span>
+                          <span className="text-xs text-zinc-400">
+                            与 {err.details.duplicateOfPosition || `图片 #${err.details.duplicateOf}`} 重复
+                          </span>
                         )}
                       </div>
                     </td>

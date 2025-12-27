@@ -409,7 +409,9 @@ export class ExcelStreamProcessor {
           }
 
           try {
-            const result = await imageValidator.validateImage(img.buffer, i);
+            // 构建位置描述
+            const positionDesc = `行${img.row} 列${img.column}`;
+            const result = await imageValidator.validateImage(img.buffer, i, positionDesc);
 
             // 为有问题的图片生成缩略图（用于预览）
             let thumbnail: { data: string; mimeType: string } | null = null;
@@ -440,14 +442,18 @@ export class ExcelStreamProcessor {
 
             if (result.isDuplicate) {
               stats.duplicateImages++;
+              const duplicateOfDesc = result.duplicateOfPosition || `图片 #${result.duplicateOf}`;
               errors.push({
                 row: img.row,
                 column: img.column,
                 field: "图片",
                 imageIndex: i,
                 errorType: "duplicate",
-                message: `重复图片 (与图片 #${result.duplicateOf} 重复)`,
-                details: { duplicateOf: result.duplicateOf },
+                message: `重复图片 (与 ${duplicateOfDesc} 重复)`,
+                details: { 
+                  duplicateOf: result.duplicateOf,
+                  duplicateOfPosition: result.duplicateOfPosition,
+                },
                 imageData: thumbnail?.data,
                 mimeType: thumbnail?.mimeType,
               });
@@ -552,14 +558,21 @@ export class ExcelStreamProcessor {
         }
 
         try {
-          const result = await imageValidator.validateImage(media.buffer, i);
+          // 获取图片位置并构建描述
+          const nativeRow = (image as any).range?.tl?.nativeRow;
+          const nativeCol = (image as any).range?.tl?.nativeCol;
+          const colLetter = nativeCol !== undefined ? this.indexToColumnLetter(nativeCol) : "";
+          const positionDesc = nativeRow !== undefined && colLetter 
+            ? `行${nativeRow + 1} 列${colLetter}` 
+            : `图片 #${i + 1}`;
+          const result = await imageValidator.validateImage(media.buffer, i, positionDesc);
 
           // 记录统计
           if (result.isBlurry) {
             stats.blurryImages++;
             errors.push({
-              row: (image as any).range?.tl?.nativeRow || 0,
-              column: (image as any).range?.tl?.nativeCol || 0,
+              row: nativeRow || 0,
+              column: colLetter || String(nativeCol || 0),
               field: "图片",
               imageIndex: i,
               errorType: "blur",
@@ -572,15 +585,17 @@ export class ExcelStreamProcessor {
 
           if (result.isDuplicate) {
             stats.duplicateImages++;
+            const duplicateOfDesc = result.duplicateOfPosition || `图片 #${result.duplicateOf}`;
             errors.push({
-              row: (image as any).range?.tl?.nativeRow || 0,
-              column: (image as any).range?.tl?.nativeCol || 0,
+              row: nativeRow || 0,
+              column: colLetter || String(nativeCol || 0),
               field: "图片",
               imageIndex: i,
               errorType: "duplicate",
-              message: `重复图片 (与图片 #${result.duplicateOf} 重复)`,
+              message: `重复图片 (与 ${duplicateOfDesc} 重复)`,
               details: {
                 duplicateOf: result.duplicateOf,
+                duplicateOfPosition: result.duplicateOfPosition,
               },
             });
           }
@@ -686,6 +701,20 @@ export class ExcelStreamProcessor {
       index = index * 26 + column.charCodeAt(i) - 64;
     }
     return index - 1; // 转换为 0-based
+  }
+
+  /**
+   * 将列索引转换为列字母（0=A, 1=B, ...）
+   */
+  private indexToColumnLetter(index: number): string {
+    let column = "";
+    let n = index + 1; // 转换为 1-based
+    while (n > 0) {
+      const remainder = (n - 1) % 26;
+      column = String.fromCharCode(65 + remainder) + column;
+      n = Math.floor((n - 1) / 26);
+    }
+    return column;
   }
 
   private isHeaderRow(row: any[], template: TaskTemplate): boolean {
