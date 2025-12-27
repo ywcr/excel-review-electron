@@ -56,6 +56,10 @@ interface ValidationResult {
       duplicateImages: number;
       suspiciousImages: number;
     };
+    /** 图片验证是否被跳过 */
+    imageValidationSkipped?: boolean;
+    /** 图片验证跳过的原因 */
+    imageValidationSkipReason?: string;
   };
   usedSheetName?: string;
 }
@@ -249,6 +253,24 @@ export function ValidationResults({
             <div className="bg-zinc-50 rounded p-3 text-center border border-zinc-100">
               <span className="block text-xl font-bold text-zinc-700">{summary.imageStats.suspiciousImages}</span>
               <span className="text-[10px] font-bold text-zinc-500 uppercase">可疑</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 图片验证跳过警告 */}
+      {summary.imageValidationSkipped && (
+        <div className="bg-amber-50 rounded-lg p-4 border border-amber-200">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl">⚠️</span>
+            <div>
+              <h4 className="text-sm font-bold text-amber-900 mb-1">图片验证已跳过</h4>
+              <p className="text-sm text-amber-800">
+                {summary.imageValidationSkipReason || '文件过大，无法进行图片验证'}
+              </p>
+              <p className="text-xs text-amber-600 mt-2">
+                建议：将文件拆分成多个较小的文件（小于 2GB）后重新审核。
+              </p>
             </div>
           </div>
         </div>

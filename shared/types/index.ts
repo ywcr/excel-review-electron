@@ -38,6 +38,10 @@ export interface ValidationSummary {
     duplicateImages: number;
     suspiciousImages: number;
   };
+  /** 图片验证是否被跳过 */
+  imageValidationSkipped?: boolean;
+  /** 图片验证跳过的原因 */
+  imageValidationSkipReason?: string;
 }
 
 export interface ValidationResult {
