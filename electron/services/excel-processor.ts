@@ -83,8 +83,15 @@ export class ExcelStreamProcessor {
       // 如果没指定工作表名，尝试匹配模板
       const matchesTemplate =
         !sheetName && this.matchesTemplate(currentSheetName, template);
+      
+      console.log(`🔍 [工作表匹配] "${currentSheetName}":`, {
+        sheetNameProvided: !!sheetName,
+        matchesTemplate,
+        templateSheetNames: template.sheetNames,
+      });
 
       if (!sheetName && !matchesTemplate) {
+        console.log(`⚠️  [跳过] 工作表 "${currentSheetName}" 不匹配模板`);
         // 不匹配，但收集信息
         for await (const row of worksheetReader) {
           rowCount++;
@@ -96,6 +103,8 @@ export class ExcelStreamProcessor {
         availableSheets.push({ name: currentSheetName, hasData: sheetHasData });
         continue;
       }
+      
+      console.log(`✅ [工作表选中] 开始处理: "${currentSheetName}"`);
 
       onProgress?.(20, `正在处理工作表: ${currentSheetName}`);
 
@@ -196,6 +205,11 @@ export class ExcelStreamProcessor {
 
     // 如果没有找到匹配的工作表，返回工作表选择信息
     if (!targetWorksheet) {
+      console.log("⚠️ [未找到匹配工作表] 返回工作表选择界面", {
+        availableSheets,
+        taskName,
+        templateSheetNames: template.sheetNames,
+      });
       return {
         isValid: false,
         needSheetSelection: true,

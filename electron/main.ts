@@ -95,23 +95,55 @@ function registerIpcHandlers() {
   ipcMain.handle(
     "validate-excel",
     async (event, filePath: string, taskName: string, sheetName?: string) => {
+      console.log("\n" + "=".repeat(60));
+      console.log("🚀 [IPC] validate-excel 请求开始");
+      console.log("=".repeat(60));
+      console.log("📁 文件路径:", filePath);
+      console.log("📋 任务类型:", taskName);
+      console.log("📄 工作表:", sheetName || "(自动检测)");
+      console.log("⏰ 时间:", new Date().toISOString());
+      console.log("-".repeat(60));
+
+      const startTime = Date.now();
+      
       try {
         const processor = new ExcelStreamProcessor();
 
         // 发送进度更新
         const progressCallback = (progress: number, message: string) => {
+          console.log(`📊 [进度] ${progress}% - ${message}`);
           event.sender.send("validation-progress", { progress, message });
         };
 
+        console.log("🔄 [IPC] 开始调用 processor.validateFile...");
         const result = await processor.validateFile(
           filePath,
           taskName,
           sheetName,
           progressCallback
         );
+        
+        const duration = Date.now() - startTime;
+        console.log("-".repeat(60));
+        console.log("✅ [IPC] validate-excel 请求完成");
+        console.log("⏱️  耗时:", duration, "ms");
+        console.log("📊 结果:", {
+          isValid: result.isValid,
+          totalRows: result.summary?.totalRows,
+          errorCount: result.summary?.errorCount,
+          imageErrors: result.imageErrors?.length || 0,
+          imageStats: result.summary?.imageStats,
+        });
+        console.log("=".repeat(60) + "\n");
+        
         return result;
       } catch (error) {
-        console.error("Validation error:", error);
+        const duration = Date.now() - startTime;
+        console.log("-".repeat(60));
+        console.error("❌ [IPC] validate-excel 请求失败");
+        console.error("⏱️  耗时:", duration, "ms");
+        console.error("错误:", error);
+        console.log("=".repeat(60) + "\n");
         throw error;
       }
     }
