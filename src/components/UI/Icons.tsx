@@ -122,6 +122,14 @@ export const SettingsIcon: React.FC<IconProps> = (props) => (
   </IconBase>
 );
 
+// 历史记录/Clock
+export const ClockIcon: React.FC<IconProps> = (props) => (
+  <IconBase {...props}>
+    <circle cx="12" cy="12" r="10" />
+    <polyline points="12 6 12 12 16 14" />
+  </IconBase>
+);
+
 // --- 状态图标 ---
 
 // 成功/Check

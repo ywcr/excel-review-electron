@@ -3,8 +3,8 @@ import { Sidebar } from "./Sidebar";
 
 interface AppLayoutProps {
   children: React.ReactNode;
-  currentMode: "single" | "batch" | "compare";
-  onModeChange: (mode: "single" | "batch" | "compare") => void;
+  currentMode: "single" | "batch" | "compare" | "history";
+  onModeChange: (mode: "single" | "batch" | "compare" | "history") => void;
 }
 
 export function AppLayout({ children, currentMode, onModeChange }: AppLayoutProps) {
@@ -18,6 +18,7 @@ export function AppLayout({ children, currentMode, onModeChange }: AppLayoutProp
             {currentMode === "single" && "主页 / 单文件验证"}
             {currentMode === "batch" && "主页 / 批量验证"}
             {currentMode === "compare" && "主页 / 文件比较"}
+            {currentMode === "history" && "主页 / 验证历史"}
           </div>
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-emerald-500"></div>

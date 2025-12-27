@@ -3,6 +3,7 @@ import path from "path";
 import ExcelJS from "exceljs";
 import { ExcelStreamProcessor } from "./services/excel-processor";
 import { ExcelComparer } from "./services/excel-comparer";
+import { historyStore } from "./services/history-store";
 import type { ValidationResult } from "../shared/types";
 
 let mainWindow: BrowserWindow | null = null;
@@ -136,6 +137,19 @@ function registerIpcHandlers() {
         });
         console.log("=".repeat(60) + "\n");
         
+        // 自动保存验证历史
+        historyStore.addRecord({
+          fileName: path.basename(filePath),
+          filePath,
+          taskName,
+          summary: {
+            totalRows: result.summary?.totalRows || 0,
+            errorCount: result.summary?.errorCount || 0,
+            imageErrorCount: result.imageErrors?.length || 0,
+          },
+          isValid: result.isValid,
+        });
+        
         return result;
       } catch (error) {
         const duration = Date.now() - startTime;
@@ -152,6 +166,23 @@ function registerIpcHandlers() {
   // 取消验证
   ipcMain.handle("cancel-validation", async () => {
     // TODO: 实现取消逻辑
+    return true;
+  });
+
+  // ========== 历史记录 IPC ==========
+  // 获取所有历史记录
+  ipcMain.handle("get-history", async () => {
+    return historyStore.getAll();
+  });
+
+  // 删除单条历史记录
+  ipcMain.handle("delete-history", async (_event, id: string) => {
+    return historyStore.deleteById(id);
+  });
+
+  // 清空历史记录
+  ipcMain.handle("clear-history", async () => {
+    historyStore.clearAll();
     return true;
   });
 

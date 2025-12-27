@@ -2,12 +2,13 @@ import React from "react";
 import { 
   FileTextIcon, 
   FolderIcon, 
-  BarChartIcon
+  BarChartIcon,
+  ClockIcon
 } from "../UI/Icons";
 
 interface SidebarProps {
-  currentMode: "single" | "batch" | "compare";
-  onModeChange: (mode: "single" | "batch" | "compare") => void;
+  currentMode: "single" | "batch" | "compare" | "history";
+  onModeChange: (mode: "single" | "batch" | "compare" | "history") => void;
 }
 
 export function Sidebar({ currentMode, onModeChange }: SidebarProps) {
@@ -15,6 +16,7 @@ export function Sidebar({ currentMode, onModeChange }: SidebarProps) {
     { id: "single", label: "单文件验证", icon: <FileTextIcon size={18} /> },
     { id: "batch", label: "批量验证", icon: <FolderIcon size={18} /> },
     { id: "compare", label: "文件比较", icon: <BarChartIcon size={18} /> },
+    { id: "history", label: "验证历史", icon: <ClockIcon size={18} /> },
   ] as const;
 
   return (

@@ -131,6 +131,18 @@ declare global {
         filePath: string,
         result: any
       ) => Promise<ExportResult>;
+      // 历史记录 API
+      getHistory: () => Promise<Array<{
+        id: string;
+        fileName: string;
+        filePath: string;
+        taskName: string;
+        timestamp: number;
+        summary: { totalRows: number; errorCount: number; imageErrorCount: number };
+        isValid: boolean;
+      }>>;
+      deleteHistory: (id: string) => Promise<boolean>;
+      clearHistory: () => Promise<boolean>;
       onProgress: (callback: (data: ValidationProgress) => void) => void;
       removeProgressListener: () => void;
     };

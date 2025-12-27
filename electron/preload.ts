@@ -33,6 +33,16 @@ const electronAPI = {
   exportComparisonResult: (filePath: string, result: any) =>
     ipcRenderer.invoke("export-comparison-result", filePath, result),
 
+  // ========== 历史记录 API ==========
+  // 获取所有历史记录
+  getHistory: () => ipcRenderer.invoke("get-history"),
+
+  // 删除单条历史记录
+  deleteHistory: (id: string) => ipcRenderer.invoke("delete-history", id),
+
+  // 清空历史记录
+  clearHistory: () => ipcRenderer.invoke("clear-history"),
+
   // 监听进度更新
   onProgress: (
     callback: (data: { progress: number; message: string }) => void

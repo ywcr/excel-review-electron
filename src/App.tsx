@@ -3,6 +3,7 @@ import { useElectronValidation } from "./hooks/useElectronValidation";
 import { ValidationResults } from "./components/ValidationResults";
 import { BatchValidation } from "./components/BatchValidation";
 import { ExcelComparison } from "./components/ExcelComparison";
+import { ValidationHistory } from "./components/ValidationHistory";
 import { PasscodeScreen } from "./components/PasscodeScreen";
 import { AppLayout } from "./components/Layout/AppLayout";
 import { GhostButton } from "./components/UI/Buttons";
@@ -12,7 +13,7 @@ import "./styles/tailwind.css";
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [mode, setMode] = useState<"single" | "batch" | "compare">("single");
+  const [mode, setMode] = useState<"single" | "batch" | "compare" | "history">("single");
   const [selectedTask, setSelectedTask] = useState("药店拜访");
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [selectedSheet, setSelectedSheet] = useState<string | undefined>(
@@ -162,6 +163,11 @@ function App() {
     // 比较模式
     if (mode === "compare") {
       return <ExcelComparison onClose={() => setMode("single")} />;
+    }
+
+    // 历史记录模式
+    if (mode === "history") {
+      return <ValidationHistory />;
     }
 
     // 单文件验证模式 (默认)
