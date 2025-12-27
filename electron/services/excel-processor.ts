@@ -409,7 +409,11 @@ export class ExcelStreamProcessor {
         console.log(`📷 [阶段二] 开始并行验证 ${wpsImages.length} 张图片...`);
         onProgress?.(84, `正在并行验证图片 (0/${wpsImages.length})...`);
         
-        const CONCURRENCY = 6; // 并发数
+        // 根据 CPU 核心数自适应并发数（最小4，最大12）
+        const os = await import("os");
+        const cpuCount = os.cpus().length;
+        const CONCURRENCY = Math.max(4, Math.min(12, cpuCount));
+        console.log(`📷 [并发配置] CPU 核心数: ${cpuCount}, 使用并发数: ${CONCURRENCY}`);
         const limit = pLimit(CONCURRENCY);
         const analysisStartTime = Date.now();
         
