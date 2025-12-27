@@ -65,17 +65,35 @@ function App() {
     setIsDragging(false);
 
     const files = e.dataTransfer.files;
+    console.log('[拖拽上传] 接收到文件:', files.length, '个');
+    
     if (files.length > 0) {
       const file = files[0];
+      console.log('[拖拽上传] 文件信息:', {
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        path: (file as any).path,
+      });
+      
       // 检查是否是 Excel 文件
-      if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
-        // Electron 中可以通过 path 属性获取文件路径
-        const filePath = (file as any).path;
-        if (filePath) {
-          setSelectedFile(filePath);
-          setSelectedSheet(undefined);
-          clearResult();
-        }
+      const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls');
+      if (!isExcel) {
+        console.log('[拖拽上传] 不是 Excel 文件，忽略');
+        return;
+      }
+      
+      // Electron 中可以通过 path 属性获取文件路径
+      const filePath = (file as any).path;
+      console.log('[拖拽上传] 文件路径:', filePath);
+      
+      if (filePath) {
+        setSelectedFile(filePath);
+        setSelectedSheet(undefined);
+        clearResult();
+        console.log('[拖拽上传] 文件已设置:', filePath);
+      } else {
+        console.error('[拖拽上传] 无法获取文件路径 - Electron 环境可能未正确配置');
       }
     }
   }, [clearResult]);
