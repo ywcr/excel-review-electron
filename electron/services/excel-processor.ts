@@ -174,11 +174,17 @@ export class ExcelStreamProcessor {
             // 行验证占 30-70%，使用更平滑的进度计算
             const progress = Math.min(30 + Math.sqrt(totalRows) * 2, 70);
             onProgress?.(progress, `已验证 ${totalRows} 行`);
-            console.log(`📊 [数据处理] 已验证 ${totalRows} 行`);
+            console.log(`📊 [数据处理] 已验证 ${totalRows} 行，当前错误数: ${errors.length}`);
           }
         }
       }
 
+      console.log("📊 [数据处理完成]", {
+        sheet: currentSheetName,
+        totalRows,
+        errorsFound: errors.length,
+        headerRowIndex,
+      });
       targetWorksheet = currentSheetName;
       availableSheets.push({ name: currentSheetName, hasData: totalRows > 0 });
       break; // 只处理第一个匹配的工作表
@@ -217,7 +223,11 @@ export class ExcelStreamProcessor {
     console.log("✅ [跨行验证完成]", { crossRowErrors: crossRowErrors.length });
     errors.push(...crossRowErrors);
 
-    console.log("🖼️ [图片验证开始]");
+    console.log("🖼️ [图片验证开始]", {
+      filePath,
+      targetWorksheet,
+      timestamp: new Date().toISOString(),
+    });
     onProgress?.(75, "正在验证图片...");
 
     // 图片验证
@@ -229,19 +239,36 @@ export class ExcelStreamProcessor {
       suspiciousImages: 0,
     };
 
+    const imageValidationStartTime = Date.now();
     try {
+      console.log("🖼️ [图片验证] 创建 ImageValidator...");
       const imageValidator = new ImageValidator();
+      
+      console.log("🖼️ [图片验证] 开始调用 validateImages...");
       const imageResults = await this.validateImages(
         filePath,
         targetWorksheet,
         imageValidator,
         onProgress
       );
+      
+      const imageValidationDuration = Date.now() - imageValidationStartTime;
+      console.log("✅ [图片验证完成]", {
+        ...imageResults.stats,
+        errorsFound: imageResults.errors.length,
+        durationMs: imageValidationDuration,
+      });
+      
       imageErrors.push(...imageResults.errors);
       imageStats = imageResults.stats;
-      console.log("✅ [图片验证完成]", imageStats);
     } catch (error) {
-      console.error("❌ [图片验证失败]:", error);
+      const imageValidationDuration = Date.now() - imageValidationStartTime;
+      console.error("❌ [图片验证失败]:", {
+        error,
+        durationMs: imageValidationDuration,
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
       // 图片验证失败不阻止整体验证
     }
 
@@ -301,9 +328,19 @@ export class ExcelStreamProcessor {
 
     try {
       // 首先尝试 WPS DISPIMG 格式图片提取
-      console.log("📷 [图片验证] 尝试 WPS DISPIMG 格式提取...");
+      console.log("📷 [图片验证] 尝试 WPS DISPIMG 格式提取...", {
+        filePath,
+        sheetName,
+        timestamp: new Date().toISOString(),
+      });
+      const wpsExtractStartTime = Date.now();
       const wpsExtractor = new WpsImageExtractor();
       const wpsImages = await wpsExtractor.extractImages(filePath, sheetName);
+      const wpsExtractDuration = Date.now() - wpsExtractStartTime;
+      console.log(`📷 [图片验证] WPS 提取完成`, {
+        foundImages: wpsImages.length,
+        durationMs: wpsExtractDuration,
+      });
 
       if (wpsImages.length > 0) {
         console.log(
@@ -430,22 +467,37 @@ export class ExcelStreamProcessor {
         return { errors, stats };
       }
 
-      console.log("📷 [图片验证] 非 WPS 格式，尝试标准 ExcelJS 提取...");
+      console.log("📷 [图片验证] 非 WPS 格式，尝试标准 ExcelJS 提取...", {
+        filePath,
+        sheetName,
+        timestamp: new Date().toISOString(),
+      });
 
       // 回退到 ExcelJS 方式
+      const excelJsStartTime = Date.now();
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.readFile(filePath);
+      const excelJsLoadDuration = Date.now() - excelJsStartTime;
+      console.log("📷 [图片验证] ExcelJS 文件加载完成", {
+        durationMs: excelJsLoadDuration,
+      });
 
       const worksheet = workbook.getWorksheet(sheetName);
       if (!worksheet) {
+        console.log("📷 [图片验证] 未找到目标工作表", { sheetName });
         return { errors, stats };
       }
 
       // 获取工作表中的图片
       const images = worksheet.getImages();
       stats.totalImages = images.length;
+      console.log("📷 [图片验证] ExcelJS 图片提取完成", {
+        totalImages: images.length,
+        sheetName,
+      });
 
       if (images.length === 0) {
+        console.log("📷 [图片验证] 工作表中没有图片");
         return { errors, stats };
       }
 

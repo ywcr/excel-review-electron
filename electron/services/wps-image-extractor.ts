@@ -60,7 +60,7 @@ export class WpsImageExtractor {
 
       // 解析 cellimages.xml 获取图片信息
       const cellImageInfos = this.parseCellImages(cellimagesXml);
-      console.log(`📷 [WPS提取] 找到 ${cellImageInfos.length} 个图片定义`);
+      console.log(`📷 [WPS提取] 找到 ${cellImageInfos.length} 个图片定义，正在处理...`);
 
       // 获取目标工作表文件
       const worksheetFile = await this.getWorksheetFile(zip, targetSheet);
@@ -121,7 +121,11 @@ export class WpsImageExtractor {
       console.log(`📷 [WPS提取] 成功提取 ${images.length} 张图片`);
       return images;
     } catch (error) {
-      console.error("📷 [WPS提取] 提取失败:", error);
+      console.error("📷 [WPS提取] 提取失败:", {
+        error,
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
       return images;
     }
   }
