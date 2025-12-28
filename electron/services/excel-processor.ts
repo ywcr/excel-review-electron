@@ -293,10 +293,17 @@ export class ExcelStreamProcessor {
         ...imageResults.stats,
         errorsFound: imageResults.errors.length,
         durationMs: imageValidationDuration,
+        isNotWpsFormat: imageResults.isNotWpsFormat,
       });
       
-      imageErrors.push(...imageResults.errors);
-      imageStats = imageResults.stats;
+      // 检查是否为非 WPS 格式
+      if (imageResults.isNotWpsFormat) {
+        imageValidationSkipped = true;
+        imageValidationSkipReason = "检测到非 WPS 格式文件，图片验证已跳过。请使用 WPS 打开该文件并另存为 xlsx 格式后重新审核。";
+      } else {
+        imageErrors.push(...imageResults.errors);
+        imageStats = imageResults.stats;
+      }
     } catch (error) {
       const imageValidationDuration = Date.now() - imageValidationStartTime;
       console.error("❌ [图片验证失败]:", {
@@ -359,6 +366,7 @@ export class ExcelStreamProcessor {
       duplicateImages: number;
       suspiciousImages: number;
     };
+    isNotWpsFormat?: boolean;
   }> {
     const errors: ImageValidationError[] = [];
     const stats = {
@@ -399,63 +407,21 @@ export class ExcelStreamProcessor {
           index: i,
         }));
       } else {
-        // 2. 回退到 ExcelJS 方式
-        console.log("📷 [图片验证] 非 WPS 格式，尝试标准 ExcelJS 提取...", {
+        // 非 WPS 格式，跳过图片验证并提示用户
+        console.log("📷 [图片验证] 非 WPS 格式，跳过图片验证", {
           filePath,
           sheetName,
         });
-
-        const workbook = new ExcelJS.Workbook();
-        await workbook.xlsx.readFile(filePath);
-        const worksheet = workbook.getWorksheet(sheetName);
-
-        if (worksheet) {
-          const images = worksheet.getImages();
-          stats.totalImages = images.length;
-          console.log("📷 [图片验证] ExcelJS 图片提取完成", {
-            totalImages: images.length,
-            sheetName,
-          });
-
-          // 辅助函数: 列索引转字母
-          const indexToColumnLetter = (index: number): string => {
-            let column = "";
-            let n = index + 1;
-            while (n > 0) {
-              const remainder = (n - 1) % 26;
-              column = String.fromCharCode(65 + remainder) + column;
-              n = Math.floor((n - 1) / 26);
-            }
-            return column;
-          };
-
-          for (let i = 0; i < images.length; i++) {
-            const image = images[i];
-            const imageId = (image as any).imageId;
-            const media = (workbook.model as any).media?.find(
-              (m: any) => m.index === imageId
-            );
-
-            if (!media || !media.buffer) continue;
-
-            const nativeRow = (image as any).range?.tl?.nativeRow || 0;
-            const nativeCol = (image as any).range?.tl?.nativeCol || 0;
-            const colLetter = indexToColumnLetter(nativeCol);
-            const positionDesc = `行${nativeRow + 1} 列${colLetter}`;
-
-            imagesToProc.push({
-              buffer: media.buffer,
-              positionDesc,
-              row: nativeRow + 1, // 1-based logic consistent with WPS extractor?
-              // WPS Extractor seems to return 1-based logic in "row" property?
-              // Let's assume yes or verify. WPS extractor lines 157+ logic.
-              column: colLetter,
-              index: i,
-            });
-          }
-        } else {
-          console.log("📷 [图片验证] 未找到目标工作表");
-        }
+        return {
+          errors: [],
+          stats: {
+            totalImages: 0,
+            blurryImages: 0,
+            duplicateImages: 0,
+            suspiciousImages: 0,
+          },
+          isNotWpsFormat: true,
+        };
       }
 
       if (imagesToProc.length === 0) {

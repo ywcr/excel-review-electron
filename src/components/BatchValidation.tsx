@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import { ValidationResults } from "./ValidationResults";
 import { GhostButton, OutlineButton } from "./UI/Buttons";
 import { AddTaskModal } from "./UI/AddTaskModal";
@@ -52,23 +52,85 @@ export function BatchValidation({
   const [isValidating, setIsValidating] = useState(false);
   const [selectedResult, setSelectedResult] = useState<ReviewTask | null>(null);
   const [addTaskFor, setAddTaskFor] = useState<UploadedFile | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const dragCounter = useRef(0);
+
+  // 处理添加文件的通用函数
+  const addFiles = useCallback((filePaths: string[]) => {
+    const newFiles: UploadedFile[] = filePaths
+      .filter((fp: string) => !files.some((f) => f.filePath === fp)) // 去重
+      .map((filePath: string) => ({
+        id: `file-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        filePath,
+        fileName: filePath.split("/").pop() || filePath,
+      }));
+
+    if (newFiles.length > 0) {
+      setFiles((prev) => [...prev, ...newFiles]);
+    }
+  }, [files]);
+
+  // 拖拽事件处理
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current++;
+    if (dragCounter.current === 1) {
+      setIsDragging(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current--;
+    if (dragCounter.current === 0) {
+      setIsDragging(false);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current = 0;
+    setIsDragging(false);
+
+    const droppedFiles = e.dataTransfer.files;
+    const excelPaths: string[] = [];
+
+    for (let i = 0; i < droppedFiles.length; i++) {
+      const file = droppedFiles[i];
+      const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls');
+      if (isExcel) {
+        try {
+          const filePath = window.electron.getPathForFile(file);
+          if (filePath) {
+            excelPaths.push(filePath);
+          }
+        } catch (err) {
+          console.error('[拖拽上传] 获取文件路径失败:', err);
+        }
+      }
+    }
+
+    if (excelPaths.length > 0) {
+      addFiles(excelPaths);
+    }
+  }, [addFiles]);
 
   // 选择多个文件
   const handleSelectFiles = async () => {
     try {
       const filePaths = await window.electron.selectMultipleFiles?.();
-      if (!filePaths || filePaths.length === 0) return;
-
-      const newFiles: UploadedFile[] = filePaths
-        .filter((fp: string) => !files.some((f) => f.filePath === fp)) // 去重
-        .map((filePath: string) => ({
-          id: `file-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          filePath,
-          fileName: filePath.split("/").pop() || filePath,
-        }));
-
-      setFiles((prev) => [...prev, ...newFiles]);
+      if (filePaths && filePaths.length > 0) {
+        addFiles(filePaths);
+      }
     } catch (err) {
       console.error("选择文件失败:", err);
     }
@@ -229,7 +291,17 @@ export function BatchValidation({
       </div>
 
       {/* ===== 第一步：文件上传 ===== */}
-      <section className="bg-white border border-zinc-200 rounded-lg p-6">
+      <section 
+        className={`bg-white border-2 rounded-lg p-6 transition-all duration-200 ${
+          isDragging 
+            ? 'border-blue-500 bg-blue-50/30' 
+            : 'border-zinc-200 border-dashed'
+        } ${isValidating ? 'opacity-50 pointer-events-none' : ''}`}
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+      >
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-bold text-zinc-900 flex items-center gap-2">
             <span className="w-5 h-5 rounded-full bg-black text-white text-xs flex items-center justify-center">1</span>
@@ -245,9 +317,14 @@ export function BatchValidation({
         </div>
 
         {files.length === 0 ? (
-          <div className="text-center py-8 text-zinc-400">
-            <p>尚未上传任何文件</p>
-            <p className="text-xs mt-1">点击上方按钮选择 Excel 文件</p>
+          <div className={`text-center py-12 transition-all ${isDragging ? 'scale-105' : ''}`}>
+            <div className={`text-5xl mb-4 ${isDragging ? 'animate-bounce' : ''}`}>
+              {isDragging ? '📥' : '📂'}
+            </div>
+            <p className="text-zinc-600 font-medium">
+              {isDragging ? '松开鼠标上传文件' : '拖拽 Excel 文件到此处'}
+            </p>
+            <p className="text-xs text-zinc-400 mt-2">或点击上方按钮选择文件，支持多选</p>
           </div>
         ) : (
           <div className="space-y-2">
