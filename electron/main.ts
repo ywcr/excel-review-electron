@@ -137,18 +137,24 @@ function registerIpcHandlers() {
         });
         console.log("=".repeat(60) + "\n");
         
-        // 自动保存验证历史
-        historyStore.addRecord({
-          fileName: path.basename(filePath),
-          filePath,
-          taskName,
-          summary: {
-            totalRows: result.summary?.totalRows || 0,
-            errorCount: result.summary?.errorCount || 0,
-            imageErrorCount: result.imageErrors?.length || 0,
-          },
-          isValid: result.isValid,
-        });
+        // 自动保存验证历史 (传入 full result 以保存详细报告)
+        // 只有当不需要选择工作表时才保存历史，避免出现"等待选择"的中间状态记录
+        if (!result.needSheetSelection) {
+          historyStore.addRecord({
+            fileName: path.basename(filePath),
+            filePath,
+            taskName,
+            summary: {
+              totalRows: result.summary?.totalRows || 0,
+              errorCount: result.summary?.errorCount || 0,
+              imageErrorCount: result.imageErrors?.length || 0,
+            },
+            isValid: result.isValid,
+            // 仍然保存部分预览到 store 以便快速加载列表
+            previewErrors: result.errors ? result.errors.slice(0, 20) : [],
+            previewImageErrors: result.imageErrors ? result.imageErrors.slice(0, 5) : [],
+          }, result); // 传入 result 作为第二个参数
+        }
         
         return result;
       } catch (error) {
@@ -173,6 +179,11 @@ function registerIpcHandlers() {
   // 获取所有历史记录
   ipcMain.handle("get-history", async () => {
     return historyStore.getAll();
+  });
+
+  // 获取历史详情
+  ipcMain.handle("get-history-detail", async (_event, id: string) => {
+    return historyStore.getDetail(id);
   });
 
   // 删除单条历史记录

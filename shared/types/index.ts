@@ -2,17 +2,17 @@
 
 export interface ValidationError {
   row: number;
-  column: string;
+  column?: string;
   field: string;
-  value: any;
+  value?: any;
   message: string;
   errorType: string;
 }
 
 export interface ImageValidationError {
   row: number;
-  column: string;
-  field: string;
+  column?: string;
+  field?: string;
   imageIndex: number;
   errorType: "blur" | "duplicate" | "suspicious";
   message: string;
@@ -140,7 +140,11 @@ declare global {
         timestamp: number;
         summary: { totalRows: number; errorCount: number; imageErrorCount: number };
         isValid: boolean;
+        previewErrors?: ValidationError[];
+        previewImageErrors?: ImageValidationError[];
+        hasDetail?: boolean;
       }>>;
+      getHistoryDetail: (id: string) => Promise<ValidationResult | null>;
       deleteHistory: (id: string) => Promise<boolean>;
       clearHistory: () => Promise<boolean>;
       onProgress: (callback: (data: ValidationProgress) => void) => void;

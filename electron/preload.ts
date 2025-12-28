@@ -35,7 +35,11 @@ const electronAPI = {
 
   // ========== 历史记录 API ==========
   // 获取所有历史记录
+  // 获取所有历史记录
   getHistory: () => ipcRenderer.invoke("get-history"),
+
+  // 获取历史详情
+  getHistoryDetail: (id: string) => ipcRenderer.invoke("get-history-detail", id),
 
   // 删除单条历史记录
   deleteHistory: (id: string) => ipcRenderer.invoke("delete-history", id),

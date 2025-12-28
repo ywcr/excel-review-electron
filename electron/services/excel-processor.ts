@@ -9,9 +9,18 @@ import { TASK_TEMPLATES } from "../../shared/validation-rules";
 import { RowValidator } from "../validators/row-validator";
 import { ImageValidator } from "../validators/image-validator";
 import { WpsImageExtractor } from "./wps-image-extractor";
+import { XlsxParser } from "./xlsx-parser";
+import { ImageValidationService } from "./image-validation-service";
 
 export class ExcelStreamProcessor {
   private isCancelled = false;
+  private xlsxParser: XlsxParser;
+  private imageValidationService: ImageValidationService;
+
+  constructor() {
+    this.xlsxParser = new XlsxParser();
+    this.imageValidationService = new ImageValidationService();
+  }
 
   async validateFile(
     filePath: string,
@@ -83,7 +92,7 @@ export class ExcelStreamProcessor {
 
       // 如果没指定工作表名，尝试匹配模板
       const matchesTemplate =
-        !sheetName && this.matchesTemplate(currentSheetName, template);
+        !sheetName && this.xlsxParser.matchesTemplate(currentSheetName, template);
       
       console.log(`🔍 [工作表匹配] "${currentSheetName}":`, {
         sheetNameProvided: !!sheetName,
@@ -137,14 +146,14 @@ export class ExcelStreamProcessor {
         // 前10行尝试找表头
         if (rowIndex <= 10 && !foundHeader) {
           // Changed `!headerRow` to `!foundHeader`
-          const rowData = this.extractRowData(row);
+          const rowData = this.xlsxParser.extractRowData(row);
           // let totalHeaders = 0; // This variable was in the user's snippet but not used. Removing it.
 
           if (rowIndex <= 5) {
             console.log(`    行 ${rowIndex} 内容:`, rowData.slice(0, 10));
           }
 
-          if (this.isHeaderRow(rowData, template)) {
+          if (this.xlsxParser.isHeaderRow(rowData, template)) {
             headerRow = rowData;
             headerRowIndex = rowIndex;
             foundHeader = true; // Set foundHeader to true
@@ -161,10 +170,10 @@ export class ExcelStreamProcessor {
         // 如果找到了表头，继续读取数据行
         if (foundHeader && rowIndex > headerRowIndex) {
           // Use foundHeader here
-          const rowArray = this.extractRowData(row);
+          const rowArray = this.xlsxParser.extractRowData(row);
 
           // 转换为对象格式
-          const rowData = this.arrayToObject(rowArray, headerRow, template);
+          const rowData = this.xlsxParser.arrayToObject(rowArray, headerRow, template);
 
           // 验证单行
           const rowErrors = validator.validateRow(
@@ -272,14 +281,10 @@ export class ExcelStreamProcessor {
 
     const imageValidationStartTime = Date.now();
     try {
-      console.log("🖼️ [图片验证] 创建 ImageValidator...");
-      const imageValidator = new ImageValidator();
-      
       console.log("🖼️ [图片验证] 开始调用 validateImages...");
       const imageResults = await this.validateImages(
         filePath,
         targetWorksheet,
-        imageValidator,
         onProgress
       );
       
@@ -339,10 +344,12 @@ export class ExcelStreamProcessor {
   /**
    * 验证工作表中的所有图片
    */
+  /**
+   * 验证工作表中的所有图片
+   */
   private async validateImages(
     filePath: string,
     sheetName: string,
-    imageValidator: ImageValidator,
     onProgress?: (progress: number, message: string) => void
   ): Promise<{
     errors: ImageValidationError[];
@@ -362,433 +369,179 @@ export class ExcelStreamProcessor {
     };
 
     try {
-      // 首先尝试 WPS DISPIMG 格式图片提取
+      // 1. 尝试 WPS DISPIMG 格式图片提取
       console.log("📷 [图片验证] 尝试 WPS DISPIMG 格式提取...", {
         filePath,
         sheetName,
         timestamp: new Date().toISOString(),
       });
-      const wpsExtractStartTime = Date.now();
       const wpsExtractor = new WpsImageExtractor();
       const wpsImages = await wpsExtractor.extractImages(filePath, sheetName);
-      const wpsExtractDuration = Date.now() - wpsExtractStartTime;
-      console.log(`📷 [图片验证] WPS 提取完成`, {
-        foundImages: wpsImages.length,
-        durationMs: wpsExtractDuration,
-      });
+
+      let imagesToProc: Array<{
+        buffer: Buffer;
+        positionDesc: string;
+        row: number;
+        column: string;
+        index: number;
+      }> = [];
 
       if (wpsImages.length > 0) {
         console.log(
           `📷 [图片验证] WPS 格式提取成功，发现 ${wpsImages.length} 张图片`
         );
         stats.totalImages = wpsImages.length;
-        
-        // ========== 阶段一：顺序计算哈希（重复检测需要顺序性）==========
-        console.log(`📷 [阶段一] 开始计算 ${wpsImages.length} 张图片的哈希...`);
-        onProgress?.(76, `[4/6] 正在计算图片哈希 (0/${wpsImages.length})...`);
-        
-        const imagesWithPosition = wpsImages.map((img, i) => ({
+        imagesToProc = wpsImages.map((img, i) => ({
           buffer: img.buffer,
-          position: `行${img.row} 列${img.column}`,
+          positionDesc: img.position,
+          row: img.row,
+          column: img.column,
+          index: i,
         }));
-        
-        const hashStartTime = Date.now();
-        const hashes = await imageValidator.precomputeHashes(
-          imagesWithPosition,
-          (current, total) => {
-            if (current % 10 === 0 || current === total) {
-              const hashProgress = 76 + Math.floor((current / total) * 8); // 76-84%
-              onProgress?.(hashProgress, `[4/6] 正在计算图片哈希 (${current}/${total})...`);
+      } else {
+        // 2. 回退到 ExcelJS 方式
+        console.log("📷 [图片验证] 非 WPS 格式，尝试标准 ExcelJS 提取...", {
+          filePath,
+          sheetName,
+        });
+
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.readFile(filePath);
+        const worksheet = workbook.getWorksheet(sheetName);
+
+        if (worksheet) {
+          const images = worksheet.getImages();
+          stats.totalImages = images.length;
+          console.log("📷 [图片验证] ExcelJS 图片提取完成", {
+            totalImages: images.length,
+            sheetName,
+          });
+
+          // 辅助函数: 列索引转字母
+          const indexToColumnLetter = (index: number): string => {
+            let column = "";
+            let n = index + 1;
+            while (n > 0) {
+              const remainder = (n - 1) % 26;
+              column = String.fromCharCode(65 + remainder) + column;
+              n = Math.floor((n - 1) / 26);
             }
-          }
-        );
-        const hashDuration = Date.now() - hashStartTime;
-        console.log(`📷 [阶段一完成] 哈希计算耗时: ${hashDuration}ms`);
-        
-        // ========== 阶段二：并行验证分析（模糊检测、边框检测、可疑度评分）==========
-        console.log(`📷 [阶段二] 开始并行验证 ${wpsImages.length} 张图片...`);
-        onProgress?.(84, `[5/6] 正在并行验证图片 (0/${wpsImages.length})...`);
-        
-        // 根据 CPU 核心数自适应并发数（最小4，最大12）
-        const os = await import("os");
-        const cpuCount = os.cpus().length;
-        const CONCURRENCY = Math.max(4, Math.min(12, cpuCount));
-        console.log(`📷 [并发配置] CPU 核心数: ${cpuCount}, 使用并发数: ${CONCURRENCY}`);
-        const limit = pLimit(CONCURRENCY);
-        const analysisStartTime = Date.now();
-        
-        let completedCount = 0;
-        
-        // 创建并行任务
-        const validationTasks = wpsImages.map((img, i) => 
-          limit(async () => {
-            try {
-              const result = await imageValidator.validateImageWithPrecomputedHash(
-                img.buffer,
-                i,
-                hashes[i]
-              );
-              
-              // 如果有问题，生成缩略图
-              let thumbnail: { data: string; mimeType: string } | null = null;
-              const hasError = result.isBlurry || result.isDuplicate || result.suspicionScore >= 40;
-              if (hasError) {
-                thumbnail = await imageValidator.imageProcessor.createThumbnail(img.buffer);
-              }
-              
-              // 更新进度
-              completedCount++;
-              if (completedCount % 10 === 0 || completedCount === wpsImages.length) {
-                const analysisProgress = 84 + Math.floor((completedCount / wpsImages.length) * 11); // 84-95%
-                onProgress?.(analysisProgress, `[5/6] 已验证 ${completedCount}/${wpsImages.length} 张图片`);
-              }
-              
-              return { index: i, img, result, thumbnail };
-            } catch (err) {
-              console.error(`验证第 ${i} 张 WPS 图片失败:`, err);
-              return null;
-            }
-          })
-        );
-        
-        // 等待所有任务完成
-        const results = await Promise.all(validationTasks);
-        const analysisDuration = Date.now() - analysisStartTime;
-        console.log(`📷 [阶段二完成] 并行验证耗时: ${analysisDuration}ms (并发数: ${CONCURRENCY})`);
-        
-        // 收集错误
-        for (const item of results) {
-          if (!item) continue;
-          
-          const { index: i, img, result, thumbnail } = item;
-          
-          if (result.isBlurry) {
-            stats.blurryImages++;
-            errors.push({
-              row: img.row,
-              column: img.column,
-              field: "图片",
-              imageIndex: i,
-              errorType: "blur",
-              message: `图片模糊 (清晰度: ${result.blurScore.toFixed(0)})`,
-              details: { blurScore: result.blurScore },
-              imageData: thumbnail?.data,
-              mimeType: thumbnail?.mimeType,
-            });
-          }
+            return column;
+          };
 
-          if (result.isDuplicate) {
-            stats.duplicateImages++;
-            const duplicateOfDesc = result.duplicateOfPosition || `图片 #${result.duplicateOf}`;
-            errors.push({
-              row: img.row,
-              column: img.column,
-              field: "图片",
-              imageIndex: i,
-              errorType: "duplicate",
-              message: `重复图片 (与 ${duplicateOfDesc} 重复)`,
-              details: { 
-                duplicateOf: result.duplicateOf,
-                duplicateOfPosition: result.duplicateOfPosition,
-              },
-              imageData: thumbnail?.data,
-              mimeType: thumbnail?.mimeType,
-            });
-          }
-
-          if (result.suspicionScore >= 40) {
-            stats.suspiciousImages++;
-            errors.push({
-              row: img.row,
-              column: img.column,
-              field: "图片",
-              imageIndex: i,
-              errorType: "suspicious",
-              message: `可疑图片 (${result.suspicionLabel}, 评分: ${result.suspicionScore})`,
-              details: {
-                suspicionScore: result.suspicionScore,
-                suspicionLevel: result.suspicionLevel,
-              },
-              imageData: thumbnail?.data,
-              mimeType: thumbnail?.mimeType,
-            });
-          }
-        }
-        
-        const totalDuration = hashDuration + analysisDuration;
-        console.log(`📷 [图片验证完成] 总耗时: ${totalDuration}ms, 哈希: ${hashDuration}ms, 分析: ${analysisDuration}ms`);
-
-        // 输出 PC 检测到的重复位置信息
-        console.log("\n📋 [位置汇总] PC 检测到的重复位置:");
-        const targetPositions = ["M8", "N11", "N8", "M10"];
-        for (const pos of targetPositions) {
-          const img = wpsImages.find((img) => img.position === pos);
-          if (img) {
-            const idx = wpsImages.indexOf(img);
-            console.log(`  ${pos} -> 索引 #${idx}`);
-          } else {
-            console.log(`  ${pos} -> 未找到!`);
-          }
-        }
-        console.log("📋 PC 检测的重复关系: M8↔N11, N8↔M10\n");
-
-        return { errors, stats };
-      }
-
-      console.log("📷 [图片验证] 非 WPS 格式，尝试标准 ExcelJS 提取...", {
-        filePath,
-        sheetName,
-        timestamp: new Date().toISOString(),
-      });
-
-      // 回退到 ExcelJS 方式
-      const excelJsStartTime = Date.now();
-      const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.readFile(filePath);
-      const excelJsLoadDuration = Date.now() - excelJsStartTime;
-      console.log("📷 [图片验证] ExcelJS 文件加载完成", {
-        durationMs: excelJsLoadDuration,
-      });
-
-      const worksheet = workbook.getWorksheet(sheetName);
-      if (!worksheet) {
-        console.log("📷 [图片验证] 未找到目标工作表", { sheetName });
-        return { errors, stats };
-      }
-
-      // 获取工作表中的图片
-      const images = worksheet.getImages();
-      stats.totalImages = images.length;
-      console.log("📷 [图片验证] ExcelJS 图片提取完成", {
-        totalImages: images.length,
-        sheetName,
-      });
-
-      if (images.length === 0) {
-        console.log("📷 [图片验证] 工作表中没有图片");
-        return { errors, stats };
-      }
-
-      onProgress?.(76, `发现 ${images.length} 张图片，正在验证...`);
-
-      // 验证每张图片
-      for (let i = 0; i < images.length; i++) {
-        const image = images[i];
-        const imageId = (image as any).imageId;
-
-        // 从 workbook.model.media 获取图片数据
-        const media = (workbook.model as any).media?.find(
-          (m: any) => m.index === imageId
-        );
-
-        if (!media || !media.buffer) {
-          continue;
-        }
-
-        try {
-          // 获取图片位置并构建描述
-          const nativeRow = (image as any).range?.tl?.nativeRow;
-          const nativeCol = (image as any).range?.tl?.nativeCol;
-          const colLetter = nativeCol !== undefined ? this.indexToColumnLetter(nativeCol) : "";
-          const positionDesc = nativeRow !== undefined && colLetter 
-            ? `行${nativeRow + 1} 列${colLetter}` 
-            : `图片 #${i + 1}`;
-          const result = await imageValidator.validateImage(media.buffer, i, positionDesc);
-
-          // 记录统计
-          if (result.isBlurry) {
-            stats.blurryImages++;
-            errors.push({
-              row: nativeRow || 0,
-              column: colLetter || String(nativeCol || 0),
-              field: "图片",
-              imageIndex: i,
-              errorType: "blur",
-              message: `图片模糊 (清晰度: ${result.blurScore.toFixed(0)})`,
-              details: {
-                blurScore: result.blurScore,
-              },
-            });
-          }
-
-          if (result.isDuplicate) {
-            stats.duplicateImages++;
-            const duplicateOfDesc = result.duplicateOfPosition || `图片 #${result.duplicateOf}`;
-            errors.push({
-              row: nativeRow || 0,
-              column: colLetter || String(nativeCol || 0),
-              field: "图片",
-              imageIndex: i,
-              errorType: "duplicate",
-              message: `重复图片 (与 ${duplicateOfDesc} 重复)`,
-              details: {
-                duplicateOf: result.duplicateOf,
-                duplicateOfPosition: result.duplicateOfPosition,
-              },
-            });
-          }
-
-          if (result.suspicionScore >= 40) {
-            // 可疑度阈值
-            stats.suspiciousImages++;
-            errors.push({
-              row: (image as any).range?.tl?.nativeRow || 0,
-              column: (image as any).range?.tl?.nativeCol || 0,
-              field: "图片",
-              imageIndex: i,
-              errorType: "suspicious",
-              message: `可疑图片 (${result.suspicionLabel}, 评分: ${result.suspicionScore})`,
-              details: {
-                suspicionScore: result.suspicionScore,
-                suspicionLevel: result.suspicionLevel,
-              },
-            });
-          }
-
-          // 更新进度
-          if ((i + 1) % 5 === 0 || i === images.length - 1) {
-            // 图片验证占 76-95%
-            const imgProgress = 76 + Math.floor(((i + 1) / images.length) * 19);
-            onProgress?.(
-              imgProgress,
-              `已验证 ${i + 1}/${images.length} 张图片`
+          for (let i = 0; i < images.length; i++) {
+            const image = images[i];
+            const imageId = (image as any).imageId;
+            const media = (workbook.model as any).media?.find(
+              (m: any) => m.index === imageId
             );
+
+            if (!media || !media.buffer) continue;
+
+            const nativeRow = (image as any).range?.tl?.nativeRow || 0;
+            const nativeCol = (image as any).range?.tl?.nativeCol || 0;
+            const colLetter = indexToColumnLetter(nativeCol);
+            const positionDesc = `行${nativeRow + 1} 列${colLetter}`;
+
+            imagesToProc.push({
+              buffer: media.buffer,
+              positionDesc,
+              row: nativeRow + 1, // 1-based logic consistent with WPS extractor?
+              // WPS Extractor seems to return 1-based logic in "row" property?
+              // Let's assume yes or verify. WPS extractor lines 157+ logic.
+              column: colLetter,
+              index: i,
+            });
           }
-        } catch (err) {
-          console.error(`Image ${i} validation failed:`, err);
+        } else {
+          console.log("📷 [图片验证] 未找到目标工作表");
         }
       }
 
-      imageValidator.reset();
+      if (imagesToProc.length === 0) {
+        return { errors, stats };
+      }
+
+      // 3. 调用服务执行验证
+      const serviceInput = imagesToProc.map((img) => ({
+        buffer: img.buffer,
+        range: null,
+        positionDesc: img.positionDesc,
+      }));
+
+      const { results, stats: serviceStats } =
+        await this.imageValidationService.validateImages(
+          serviceInput,
+          onProgress
+        );
+
+      // 合并统计数据
+      stats.blurryImages = serviceStats.blurryImages;
+      stats.duplicateImages = serviceStats.duplicateImages;
+      stats.suspiciousImages = serviceStats.suspiciousImages;
+
+      // 4. 处理结果
+      for (const { index, result, thumbnail } of results) {
+        const imageInfo = imagesToProc[index];
+
+        if (result.isBlurry) {
+          errors.push({
+            row: imageInfo.row || 0,
+            column: imageInfo.column || "",
+            field: "图片",
+            imageIndex: index,
+            errorType: "blur",
+            message: `图片模糊 (清晰度: ${result.blurScore.toFixed(0)})`,
+            details: {
+              blurScore: result.blurScore,
+            },
+            imageData: thumbnail?.data,
+            mimeType: thumbnail?.mimeType,
+          });
+        }
+
+        if (result.isDuplicate) {
+          const duplicateOfDesc =
+            result.duplicateOfPosition || `图片 #${result.duplicateOf}`;
+          errors.push({
+            row: imageInfo.row || 0,
+            column: imageInfo.column || "",
+            field: "图片",
+            imageIndex: index,
+            errorType: "duplicate",
+            message: `重复图片 (与 ${duplicateOfDesc} 重复)`,
+            details: {
+              duplicateOf: result.duplicateOf,
+              duplicateOfPosition: result.duplicateOfPosition,
+            },
+            imageData: thumbnail?.data,
+            mimeType: thumbnail?.mimeType,
+          });
+        }
+
+        if (result.suspicionScore >= 40) {
+          errors.push({
+            row: imageInfo.row || 0,
+            column: imageInfo.column || "",
+            field: "图片",
+            imageIndex: index,
+            errorType: "suspicious",
+            message: `可疑图片 (${result.suspicionLabel}, 评分: ${result.suspicionScore})`,
+            details: {
+              suspicionScore: result.suspicionScore,
+              suspicionLevel: result.suspicionLevel,
+            },
+            imageData: thumbnail?.data,
+            mimeType: thumbnail?.mimeType,
+          });
+        }
+      }
+
+      this.imageValidationService.reset();
     } catch (error) {
       console.error("Failed to validate images:", error);
     }
 
     return { errors, stats };
-  }
-
-  private extractRowData(row: any): any[] {
-    const data: any[] = [];
-    row.eachCell({ includeEmpty: true }, (cell: any, colNumber: number) => {
-      let value = cell.value;
-
-      // 处理富文本格式
-      if (value && typeof value === "object" && value.richText) {
-        // richText 是一个数组，包含多个文本片段
-        value = value.richText.map((rt: any) => rt.text || "").join("");
-        console.log(`  📝 [富文本转换] 列${colNumber}: "${value}"`);
-      }
-
-      data[colNumber - 1] = value;
-    });
-    return data;
-  }
-
-  /**
-   * 将数组转换为对象（使用字段映射）
-   */
-  private arrayToObject(
-    rowArray: any[],
-    headerRow: any[],
-    template: TaskTemplate
-  ): Record<string, any> {
-    const rowData: Record<string, any> = {};
-
-    // 遍历表头，找到对应的字段映射
-    headerRow.forEach((header, index) => {
-      if (!header) return;
-
-      // 清理表头：移除换行符和多余空格
-      const headerStr = header
-        .toString()
-        .replace(/\n/g, "")
-        .replace(/\s+/g, " ")
-        .trim();
-      const mappedField = template.fieldMappings[headerStr];
-
-      if (mappedField) {
-        rowData[mappedField] = rowArray[index];
-      }
-    });
-
-    return rowData;
-  }
-
-  private matchesTemplate(sheetName: string, template: TaskTemplate): boolean {
-    return template.sheetNames.some(
-      (name) => sheetName.includes(name) || name.includes(sheetName)
-    );
-  }
-
-  /**
-   * 将列字母转换为列索引（0-based）
-   */
-  private columnLetterToIndex(column: string): number {
-    let index = 0;
-    for (let i = 0; i < column.length; i++) {
-      index = index * 26 + column.charCodeAt(i) - 64;
-    }
-    return index - 1; // 转换为 0-based
-  }
-
-  /**
-   * 将列索引转换为列字母（0=A, 1=B, ...）
-   */
-  private indexToColumnLetter(index: number): string {
-    let column = "";
-    let n = index + 1; // 转换为 1-based
-    while (n > 0) {
-      const remainder = (n - 1) % 26;
-      column = String.fromCharCode(65 + remainder) + column;
-      n = Math.floor((n - 1) / 26);
-    }
-    return column;
-  }
-
-  private isHeaderRow(row: any[], template: TaskTemplate): boolean {
-    let matchCount = 0;
-    const requiredCount = Math.min(3, template.requiredFields.length);
-
-    console.log("🔍 [表头检查] 开始检查行是否为表头...");
-
-    for (const cell of row) {
-      if (!cell) continue;
-
-      // 清理单元格值：移除换行符、多余空格
-      const cellStr = String(cell)
-        .replace(/\n/g, "")
-        .replace(/\s+/g, "")
-        .trim()
-        .toLowerCase();
-
-      if (!cellStr) continue;
-
-      // 检查是否匹配必需字段
-      for (const required of template.requiredFields) {
-        const cleanRequired = String(required)
-          .replace(/\n/g, "")
-          .replace(/\s+/g, "")
-          .trim()
-          .toLowerCase();
-
-        if (
-          cellStr === cleanRequired ||
-          cellStr.includes(cleanRequired) ||
-          cleanRequired.includes(cellStr)
-        ) {
-          matchCount++;
-          console.log(`  ✅ 匹配字段: "${cell}" -> "${required}"`);
-          break;
-        }
-      }
-    }
-
-    const isHeader = matchCount >= requiredCount;
-    console.log(
-      `📋 [表头判断] 匹配 ${matchCount}/${requiredCount} 个必需字段 -> ${
-        isHeader ? "✅ 是表头" : "❌ 不是表头"
-      }`
-    );
-    return isHeader;
   }
 }

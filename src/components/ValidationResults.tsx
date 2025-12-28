@@ -1,70 +1,7 @@
 import { useState, useMemo } from "react";
 import { ImageModal } from "./ImagePreview";
 import { GhostButton, OutlineButton } from "./UI/Buttons";
-
-interface ValidationError {
-  row: number;
-  column?: string;
-  field: string;
-  value?: any;
-  message: string;
-  errorType: string;
-}
-
-interface ImageValidationError {
-  row: number;
-  column?: string;
-  field?: string;
-  imageIndex: number;
-  errorType: "blur" | "duplicate" | "suspicious";
-  message: string;
-  details?: {
-    blurScore?: number;
-    duplicateOf?: number;
-    /** 重复图片的位置，如 "行5 列M" */
-    duplicateOfPosition?: string;
-    suspicionScore?: number;
-    suspicionLevel?: string;
-  };
-  /** Base64 编码的缩略图数据（用于预览） */
-  imageData?: string;
-  /** 图片 MIME 类型 */
-  mimeType?: string;
-}
-
-interface ValidationResult {
-  isValid: boolean;
-  needSheetSelection?: boolean;
-  availableSheets?: Array<{ name: string; hasData: boolean }>;
-  headerValidation?: {
-    isValid: boolean;
-    missingFields: string[];
-    unmatchedFields: string[];
-    suggestions: Array<{
-      expected: string;
-      actual: string;
-      similarity: number;
-    }>;
-  };
-  errors: ValidationError[];
-  imageErrors?: ImageValidationError[];
-  summary: {
-    totalRows: number;
-    validRows: number;
-    errorCount: number;
-    imageStats?: {
-      totalImages: number;
-      blurryImages: number;
-      duplicateImages: number;
-      suspiciousImages: number;
-    };
-    /** 图片验证是否被跳过 */
-    imageValidationSkipped?: boolean;
-    /** 图片验证跳过的原因 */
-    imageValidationSkipReason?: string;
-  };
-  usedSheetName?: string;
-}
+import type { ValidationError, ImageValidationError, ValidationResult } from "../../shared/types";
 
 interface ValidationResultsProps {
   result: ValidationResult;

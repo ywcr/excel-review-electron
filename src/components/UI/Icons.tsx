@@ -28,6 +28,20 @@ const IconBase: React.FC<IconProps> = ({ size = 20, className, children, ...prop
 
 // --- 导航与文件图标 ---
 
+// 向下箭头/ChevronDown
+export const ChevronDownIcon: React.FC<IconProps> = (props) => (
+  <IconBase {...props}>
+    <polyline points="6 9 12 15 18 9" />
+  </IconBase>
+);
+
+// 向上箭头/ChevronUp
+export const ChevronUpIcon: React.FC<IconProps> = (props) => (
+  <IconBase {...props}>
+    <polyline points="18 15 12 9 6 15" />
+  </IconBase>
+);
+
 // 单文件/Excel
 export const FileTextIcon: React.FC<IconProps> = (props) => (
   <IconBase {...props}>
