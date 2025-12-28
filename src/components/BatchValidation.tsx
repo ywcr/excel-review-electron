@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import { ValidationResults } from "./ValidationResults";
+import { ValidationRequirements } from "./ValidationRequirements";
 import { GhostButton, OutlineButton } from "./UI/Buttons";
 import { AddTaskModal } from "./UI/AddTaskModal";
 import { 
@@ -565,7 +566,11 @@ export function BatchValidation({
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6 bg-white">
+            <div className="flex-1 overflow-y-auto p-6 bg-white space-y-6">
+              <ValidationRequirements
+                taskName={selectedResult.taskType}
+                validationResult={selectedResult.result}
+              />
               <ValidationResults
                 result={selectedResult.result}
                 taskName={selectedResult.taskType}

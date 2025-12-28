@@ -36,18 +36,38 @@ export function AddTaskModal({
       setIsLoading(true);
       try {
         const result = await window.electron.getExcelSheets(filePath);
-        if (result && result.sheets && result.sheets.length > 0) {
-          // 将 string[] 转换为 Sheet[]，假设都有数据
-          const sheetList: Sheet[] = result.sheets.map((name) => ({
+        console.log('[AddTaskModal] getExcelSheets result:', result);
+        
+        // getExcelSheets 返回的是 { name: string, hasData: boolean }[] 数组
+        // 或者旧格式 { sheets: string[] }
+        let sheetList: Sheet[] = [];
+        
+        if (Array.isArray(result)) {
+          // 新格式：直接是数组 [{ name, hasData }, ...]
+          sheetList = result.map((item: any) => ({
+            name: typeof item === 'string' ? item : item.name,
+            hasData: typeof item === 'string' ? true : item.hasData,
+          }));
+        } else if (result && result.sheets && Array.isArray(result.sheets)) {
+          // 旧格式：{ sheets: string[] }
+          sheetList = result.sheets.map((name: string) => ({
             name,
             hasData: true,
           }));
+        }
+        
+        if (sheetList.length > 0) {
           setSheets(sheetList);
-          // 自动选择第一个工作表
-          setSheetName(sheetList[0].name);
+          // 自动选择第一个有数据的工作表，或第一个工作表
+          const firstWithData = sheetList.find(s => s.hasData);
+          setSheetName(firstWithData?.name || sheetList[0].name);
+        } else {
+          console.warn('[AddTaskModal] 未找到有效工作表');
+          setSheets([]);
         }
       } catch (err) {
         console.error("加载工作表失败:", err);
+        setSheets([]);
       } finally {
         setIsLoading(false);
       }

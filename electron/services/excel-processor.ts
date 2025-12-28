@@ -172,6 +172,19 @@ export class ExcelStreamProcessor {
           // Use foundHeader here
           const rowArray = this.xlsxParser.extractRowData(row);
 
+          // 检查是否为空行：所有单元格都为空或null
+          const isEmptyRow = rowArray.every(
+            (cell) =>
+              cell === null ||
+              cell === undefined ||
+              (typeof cell === "string" && cell.trim() === "")
+          );
+
+          if (isEmptyRow) {
+            // 跳过空行，不计入数据行数，不验证
+            continue;
+          }
+
           // 转换为对象格式
           const rowData = this.xlsxParser.arrayToObject(rowArray, headerRow, template);
 

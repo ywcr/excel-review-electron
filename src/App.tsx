@@ -30,7 +30,7 @@ function App() {
           />
         );
       case "compare":
-        return <ExcelComparison onClose={() => setMode("single")} />;
+        return <ExcelComparison />;
       case "history":
         return (
           <ValidationHistory

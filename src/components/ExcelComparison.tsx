@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback, useRef } from "react";
 import { GhostButton, OutlineButton } from "./UI/Buttons";
 
 // 类型定义
@@ -31,11 +31,8 @@ interface ComparisonResult {
   };
 }
 
-interface ExcelComparisonProps {
-  onClose?: () => void;
-}
 
-export function ExcelComparison({ onClose }: ExcelComparisonProps) {
+export function ExcelComparison() {
   const [beforeFile, setBeforeFile] = useState<string | null>(null);
   const [afterFile, setAfterFile] = useState<string | null>(null);
   const [isComparing, setIsComparing] = useState(false);
@@ -50,6 +47,124 @@ export function ExcelComparison({ onClose }: ExcelComparisonProps) {
   );
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
+
+  // 重置比较状态，重新开始
+  const handleReset = useCallback(() => {
+    setBeforeFile(null);
+    setAfterFile(null);
+    setResult(null);
+    setError(null);
+    setProgress(null);
+    setActiveTab("summary");
+    setCurrentPage(1);
+  }, []);
+
+  // 拖拽状态
+  const [isDraggingBefore, setIsDraggingBefore] = useState(false);
+  const [isDraggingAfter, setIsDraggingAfter] = useState(false);
+  const dragCounterBefore = useRef(0);
+  const dragCounterAfter = useRef(0);
+
+  // 检查是否是 Excel 文件
+  const isExcelFile = (fileName: string) => {
+    return fileName.endsWith('.xlsx') || fileName.endsWith('.xls');
+  };
+
+  // 拖拽事件处理 - Before 文件
+  const handleDragEnterBefore = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterBefore.current++;
+    if (dragCounterBefore.current === 1) {
+      setIsDraggingBefore(true);
+    }
+  }, []);
+
+  const handleDragLeaveBefore = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterBefore.current--;
+    if (dragCounterBefore.current === 0) {
+      setIsDraggingBefore(false);
+    }
+  }, []);
+
+  const handleDragOverBefore = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDropBefore = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterBefore.current = 0;
+    setIsDraggingBefore(false);
+
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      const file = files[0];
+      if (!isExcelFile(file.name)) return;
+
+      try {
+        const filePath = window.electron.getPathForFile(file);
+        if (filePath) {
+          setBeforeFile(filePath);
+          setResult(null);
+          setError(null);
+        }
+      } catch (err) {
+        console.error('[拖拽上传] 获取文件路径失败:', err);
+      }
+    }
+  }, []);
+
+  // 拖拽事件处理 - After 文件
+  const handleDragEnterAfter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterAfter.current++;
+    if (dragCounterAfter.current === 1) {
+      setIsDraggingAfter(true);
+    }
+  }, []);
+
+  const handleDragLeaveAfter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterAfter.current--;
+    if (dragCounterAfter.current === 0) {
+      setIsDraggingAfter(false);
+    }
+  }, []);
+
+  const handleDragOverAfter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDropAfter = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterAfter.current = 0;
+    setIsDraggingAfter(false);
+
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      const file = files[0];
+      if (!isExcelFile(file.name)) return;
+
+      try {
+        const filePath = window.electron.getPathForFile(file);
+        if (filePath) {
+          setAfterFile(filePath);
+          setResult(null);
+          setError(null);
+        }
+      } catch (err) {
+        console.error('[拖拽上传] 获取文件路径失败:', err);
+      }
+    }
+  }, []);
 
   // 选择比较前文件
   const handleSelectBefore = async () => {
@@ -299,7 +414,7 @@ export function ExcelComparison({ onClose }: ExcelComparisonProps) {
           <h2 className="text-xl font-bold text-zinc-900 tracking-tight flex items-center gap-2">
             <span>📊</span> 文件比较
           </h2>
-          {onClose && <OutlineButton onClick={onClose} className="h-8 text-xs">返回</OutlineButton>}
+          <OutlineButton onClick={handleReset} className="h-8 text-xs">重新比较</OutlineButton>
         </div>
         <div className="bg-green-50 rounded-lg p-12 text-center border border-green-100">
           <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">
@@ -318,9 +433,9 @@ export function ExcelComparison({ onClose }: ExcelComparisonProps) {
         <h2 className="text-xl font-extrabold text-zinc-900 tracking-tight flex items-center gap-2">
           <span>📊</span> 文件比较
         </h2>
-        {onClose && (
-          <OutlineButton onClick={onClose} className="h-8 text-xs">
-            返回
+        {(result || beforeFile || afterFile) && (
+          <OutlineButton onClick={handleReset} className="h-8 text-xs">
+            重新比较
           </OutlineButton>
         )}
       </div>
@@ -328,10 +443,22 @@ export function ExcelComparison({ onClose }: ExcelComparisonProps) {
       {/* 文件选择区域 */}
       <div className="grid grid-cols-[1fr,auto,1fr] gap-4 items-center">
         {/* 左侧文件 */}
-        <div className={`
-          border-2 rounded-lg p-6 text-center transition-colors
-          ${beforeFile ? 'border-zinc-200 bg-white' : 'border-dashed border-zinc-300 bg-zinc-50 hover:bg-zinc-100/50'}
-        `}>
+        <div 
+          className={`
+            border-2 rounded-lg p-6 text-center transition-all duration-200
+            ${isDraggingBefore 
+              ? 'border-blue-500 bg-blue-50' 
+              : beforeFile 
+                ? 'border-zinc-200 bg-white' 
+                : 'border-dashed border-zinc-300 bg-zinc-50 hover:bg-zinc-100/50'
+            }
+            ${isComparing ? 'opacity-50 pointer-events-none' : ''}
+          `}
+          onDragEnter={handleDragEnterBefore}
+          onDragLeave={handleDragLeaveBefore}
+          onDragOver={handleDragOverBefore}
+          onDrop={handleDropBefore}
+        >
           <div className="mb-3">
             <span className="text-xs font-semibold uppercase text-zinc-400 tracking-wider">改动前</span>
           </div>
@@ -348,9 +475,17 @@ export function ExcelComparison({ onClose }: ExcelComparisonProps) {
               </button>
             </div>
           ) : (
-            <GhostButton onClick={handleSelectBefore} disabled={isComparing} className="mx-auto">
-              选择文件
-            </GhostButton>
+            <div className="flex flex-col items-center gap-2">
+              <span className={`text-3xl transition-transform ${isDraggingBefore ? 'scale-110' : ''}`}>
+                {isDraggingBefore ? '📥' : '📁'}
+              </span>
+              <p className="text-xs text-zinc-500 mb-2">
+                {isDraggingBefore ? '松开鼠标上传' : '拖拽文件到此处'}
+              </p>
+              <GhostButton onClick={handleSelectBefore} disabled={isComparing} className="mx-auto">
+                选择文件
+              </GhostButton>
+            </div>
           )}
         </div>
 
@@ -361,10 +496,22 @@ export function ExcelComparison({ onClose }: ExcelComparisonProps) {
         </div>
 
         {/* 右侧文件 */}
-        <div className={`
-          border-2 rounded-lg p-6 text-center transition-colors
-          ${afterFile ? 'border-zinc-200 bg-white' : 'border-dashed border-zinc-300 bg-zinc-50 hover:bg-zinc-100/50'}
-        `}>
+        <div 
+          className={`
+            border-2 rounded-lg p-6 text-center transition-all duration-200
+            ${isDraggingAfter 
+              ? 'border-blue-500 bg-blue-50' 
+              : afterFile 
+                ? 'border-zinc-200 bg-white' 
+                : 'border-dashed border-zinc-300 bg-zinc-50 hover:bg-zinc-100/50'
+            }
+            ${isComparing ? 'opacity-50 pointer-events-none' : ''}
+          `}
+          onDragEnter={handleDragEnterAfter}
+          onDragLeave={handleDragLeaveAfter}
+          onDragOver={handleDragOverAfter}
+          onDrop={handleDropAfter}
+        >
           <div className="mb-3">
             <span className="text-xs font-semibold uppercase text-zinc-400 tracking-wider">改动后</span>
           </div>
@@ -381,9 +528,17 @@ export function ExcelComparison({ onClose }: ExcelComparisonProps) {
               </button>
             </div>
           ) : (
-            <GhostButton onClick={handleSelectAfter} disabled={isComparing} className="mx-auto">
-              选择文件
-            </GhostButton>
+            <div className="flex flex-col items-center gap-2">
+              <span className={`text-3xl transition-transform ${isDraggingAfter ? 'scale-110' : ''}`}>
+                {isDraggingAfter ? '📥' : '📁'}
+              </span>
+              <p className="text-xs text-zinc-500 mb-2">
+                {isDraggingAfter ? '松开鼠标上传' : '拖拽文件到此处'}
+              </p>
+              <GhostButton onClick={handleSelectAfter} disabled={isComparing} className="mx-auto">
+                选择文件
+              </GhostButton>
+            </div>
           )}
         </div>
       </div>

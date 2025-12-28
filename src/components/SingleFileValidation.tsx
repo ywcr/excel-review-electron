@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import { useElectronValidation } from "../hooks/useElectronValidation";
 import { ValidationResults } from "./ValidationResults";
+import { ValidationRequirements } from "./ValidationRequirements";
 import { GhostButton } from "./UI/Buttons";
 import { SheetSelectionModal } from "./UI/SheetSelectionModal";
 
@@ -216,6 +217,14 @@ export function SingleFileValidation({
           </div>
         </section>
       </div>
+
+      {/* 验证规则展示 */}
+      {selectedTask && (
+        <ValidationRequirements
+          taskName={selectedTask}
+          validationResult={result}
+        />
+      )}
 
       {/* 工作表选择模态框 */}
       <SheetSelectionModal
