@@ -28,7 +28,7 @@ export function Sidebar({ currentMode, onModeChange }: SidebarProps) {
             alt="Logo" 
             className="w-7 h-7 rounded-md shadow-sm"
           />
-          Excel Review
+          BlueGogo
         </h1>
         <p className="text-xs text-zinc-500 mt-1 ml-1">桌面版 v1.1.0</p>
       </div>
