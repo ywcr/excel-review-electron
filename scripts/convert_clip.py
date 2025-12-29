@@ -52,8 +52,10 @@ print(f"✅ 视觉编码器已保存: {visual_onnx_path}")
 print("📝 预计算文本嵌入...")
 
 texts = [
-    # 水印检测
+    # 水印检测（增强透明水印检测）
     "a photo with visible watermark or logo overlay",
+    "a photo with semi-transparent text or logo watermark",
+    "a photo with faint watermark in the corner",
     "a clean photo without any watermark",
     # 穿着季节
     "person wearing heavy winter clothes like down jacket, coat, or scarf",
@@ -67,6 +69,9 @@ texts = [
     "summer scenery with lush green trees and bright sunshine",
     "spring scenery with blooming flowers and fresh green buds",
     "indoor scene or no natural scenery visible",
+    # 模糊检测
+    "a blurry, out of focus, or motion blurred photo",
+    "a sharp, clear, and in-focus photo",
 ]
 
 embeddings = {}

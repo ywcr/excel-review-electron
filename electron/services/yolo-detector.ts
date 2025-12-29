@@ -1,6 +1,6 @@
 /**
  * YOLO 物体检测器
- * 使用 YOLOv8n ONNX 模型检测图片中的物体
+ * 使用 YOLOv8s ONNX 模型检测图片中的物体
  */
 import * as ort from "onnxruntime-node";
 import * as path from "path";
@@ -74,9 +74,9 @@ export class YoloDetector {
     // 根据环境选择模型路径
     const isDev = !app.isPackaged;
     if (isDev) {
-      this.modelPath = path.join(process.cwd(), "electron", "models", "yolov8n.onnx");
+      this.modelPath = path.join(process.cwd(), "electron", "models", "yolov8s.onnx");
     } else {
-      this.modelPath = path.join(process.resourcesPath, "models", "yolov8n.onnx");
+      this.modelPath = path.join(process.resourcesPath, "models", "yolov8s.onnx");
     }
   }
 
