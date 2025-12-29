@@ -39,18 +39,18 @@ const WATERMARK_PROMPTS = [
 ];
 
 const CLOTHING_PROMPTS = [
-  "person wearing heavy winter clothes like down jacket, coat, or scarf",
-  "person wearing autumn clothes like sweater or light jacket",
-  "person wearing summer clothes like t-shirt, shorts, or dress",
-  "person wearing spring clothes like thin jacket or long sleeves",
+  "person wearing heavy winter down jacket, thick puffer coat, scarf, or gloves",
+  "person wearing autumn clothes like trench coat, blazer, sweater, long sleeves",
+  "person wearing summer clothes like t-shirt, shorts, skirt, dress, or sandals",
+  "person wearing spring clothes like denim jacket, hoodie, light cardigan, or pastel colors",
   "no person visible in the image",
 ];
 
 const SCENERY_PROMPTS = [
-  "winter scenery with snow, bare trees, frost, or ice",
-  "autumn scenery with yellow, orange, or red falling leaves",
-  "summer scenery with lush green trees and bright sunshine",
-  "spring scenery with blooming flowers and fresh green buds",
+  "winter scenery with bare leafless trees, dry branches, cold gray or blue sky, maybe snow",
+  "autumn scenery with yellow, orange, golden or red falling leaves",
+  "summer scenery with lush dense green foliage, bright sunshine, strong shadows",
+  "spring scenery with blooming pink flowers, cherry blossoms, fresh green sprouts, new buds",
   "indoor scene or no natural scenery visible",
 ];
 
