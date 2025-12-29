@@ -32,27 +32,25 @@ export interface ClipDetectionResult {
   rawScores?: Record<string, number>;
 }
 
-// 检测 prompts - 增强透明水印检测
+// 检测 prompts
 const WATERMARK_PROMPTS = [
   "a photo with visible watermark or logo overlay",
-  "a photo with semi-transparent text or logo watermark",
-  "a photo with faint watermark in the corner",
   "a clean photo without any watermark",
 ];
 
 const CLOTHING_PROMPTS = [
-  "person wearing heavy winter clothes like down jacket, coat, or scarf",
-  "person wearing autumn clothes like sweater or light jacket",
-  "person wearing summer clothes like t-shirt, shorts, or dress",
-  "person wearing spring clothes like thin jacket or long sleeves",
+  "person wearing heavy winter down jacket, thick puffer coat, scarf, or gloves",
+  "person wearing autumn clothes like trench coat, blazer, sweater, long sleeves",
+  "person wearing summer clothes like t-shirt, shorts, skirt, dress, or sandals",
+  "person wearing spring clothes like denim jacket, hoodie, light cardigan, or pastel colors",
   "no person visible in the image",
 ];
 
 const SCENERY_PROMPTS = [
-  "winter scenery with bare leafless trees, snow, frost, dry branches or cold weather",
-  "autumn scenery with golden yellow and orange leaves falling from trees",
-  "summer scenery with dense green foliage, bright sunshine and blue sky",
-  "spring scenery with cherry blossoms, colorful flowers blooming, and fresh green leaves",
+  "winter scenery with bare leafless trees, dry branches, cold gray or blue sky, maybe snow",
+  "autumn scenery with yellow, orange, golden or red falling leaves",
+  "summer scenery with lush dense green foliage, bright sunshine, strong shadows",
+  "spring scenery with blooming pink flowers, cherry blossoms, fresh green sprouts, new buds",
   "indoor scene or no natural scenery visible",
 ];
 
@@ -94,7 +92,7 @@ export class ClipDetector {
   async initialize(): Promise<boolean> {
     if (this.isInitialized) return true;
 
-    const visualModelPath = path.join(this.modelDir, "clip-visual-fp16.onnx");
+    const visualModelPath = path.join(this.modelDir, "clip-visual.onnx");
     const textModelPath = path.join(this.modelDir, "clip-textual.onnx");
     const embeddingsPath = path.join(this.modelDir, "text-embeddings.json");
 
@@ -254,21 +252,16 @@ export class ClipDetector {
    * 解析分数，返回检测结果
    */
   private parseScores(scores: Record<string, number>): ClipDetectionResult {
-    // 水印检测：取所有水印类型的最大分数 vs 无水印分数
-    const watermarkScores = [
-      scores[WATERMARK_PROMPTS[0]] || 0,  // 可见水印
-      scores[WATERMARK_PROMPTS[1]] || 0,  // 半透明水印
-      scores[WATERMARK_PROMPTS[2]] || 0,  // 角落水印
-    ];
-    const maxWatermarkScore = Math.max(...watermarkScores);
-    const cleanScore = scores[WATERMARK_PROMPTS[3]] || 0;  // 无水印
-    const watermarkConfidence = Math.abs(maxWatermarkScore - cleanScore) * 100;
+    // 水印检测：比较有水印 vs 无水印的分数
+    const watermarkScore = scores[WATERMARK_PROMPTS[0]] || 0;
+    const cleanScore = scores[WATERMARK_PROMPTS[1]] || 0;
+    const watermarkConfidence = Math.abs(watermarkScore - cleanScore) * 100;
     
     // 水印检测需要满足两个条件：
-    // 1. 任意"有水印"分数 > "无水印"分数
-    // 2. 置信度（分数差）需要 >= 8%（降低阈值以提高透明水印检测敏感度）
-    const WATERMARK_CONFIDENCE_THRESHOLD = 8;
-    const hasWatermark = maxWatermarkScore > cleanScore && watermarkConfidence >= WATERMARK_CONFIDENCE_THRESHOLD;
+    // 1. "有水印"分数 > "无水印"分数
+    // 2. 置信度（分数差）需要 >= 10%，表示模型足够确定
+    const WATERMARK_CONFIDENCE_THRESHOLD = 10;
+    const hasWatermark = watermarkScore > cleanScore && watermarkConfidence >= WATERMARK_CONFIDENCE_THRESHOLD;
 
     // 穿着季节检测
     const clothingScores = [
