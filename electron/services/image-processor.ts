@@ -177,7 +177,7 @@ export class ImageProcessor {
   }
 
   /**
-   * 检测图片边框
+   * 检测图片边框（与 PC 端一致的算法）
    * 分析边缘像素判断是否有明显边框
    */
   async detectBorder(imageBuffer: Buffer): Promise<{
@@ -185,6 +185,15 @@ export class ImageProcessor {
     borderSides: string[];
     borderWidth: Record<string, number>;
   }> {
+    // 边框检测配置（调整后更敏感）
+    const BORDER_CONFIG = {
+      BORDER_MIN_WIDTH: 1,        // 最小边框宽度（像素）- 检测1px边框
+      BORDER_MAX_WIDTH: 40,       // 最大边框宽度（像素）
+      BORDER_COLOR_TOLERANCE: 20, // 颜色容差（0-255）- 适当放宽
+      BORDER_CONSISTENCY_RATIO: 0.85, // 边框一致性比例（85%的像素需要符合条件）
+      BORDER_BRIGHTNESS_DIFF: 25, // 边框与内容的最小亮度差异 - 降低以检测更多边框
+    };
+
     try {
       const { data, info } = await sharp(imageBuffer)
         .raw()
@@ -195,51 +204,31 @@ export class ImageProcessor {
       const borderWidth: Record<string, number> = {};
 
       // 检测上边框
-      if (this.hasBorderOnSide(data, width, height, channels, "top")) {
+      const topBorderWidth = this.detectBorderEdge(data, width, height, channels, "top", BORDER_CONFIG);
+      if (topBorderWidth >= BORDER_CONFIG.BORDER_MIN_WIDTH && topBorderWidth <= BORDER_CONFIG.BORDER_MAX_WIDTH) {
         borderSides.push("top");
-        borderWidth.top = this.measureBorderWidth(
-          data,
-          width,
-          height,
-          channels,
-          "top"
-        );
+        borderWidth.top = topBorderWidth;
       }
 
       // 检测下边框
-      if (this.hasBorderOnSide(data, width, height, channels, "bottom")) {
+      const bottomBorderWidth = this.detectBorderEdge(data, width, height, channels, "bottom", BORDER_CONFIG);
+      if (bottomBorderWidth >= BORDER_CONFIG.BORDER_MIN_WIDTH && bottomBorderWidth <= BORDER_CONFIG.BORDER_MAX_WIDTH) {
         borderSides.push("bottom");
-        borderWidth.bottom = this.measureBorderWidth(
-          data,
-          width,
-          height,
-          channels,
-          "bottom"
-        );
+        borderWidth.bottom = bottomBorderWidth;
       }
 
       // 检测左边框
-      if (this.hasBorderOnSide(data, width, height, channels, "left")) {
+      const leftBorderWidth = this.detectBorderEdge(data, width, height, channels, "left", BORDER_CONFIG);
+      if (leftBorderWidth >= BORDER_CONFIG.BORDER_MIN_WIDTH && leftBorderWidth <= BORDER_CONFIG.BORDER_MAX_WIDTH) {
         borderSides.push("left");
-        borderWidth.left = this.measureBorderWidth(
-          data,
-          width,
-          height,
-          channels,
-          "left"
-        );
+        borderWidth.left = leftBorderWidth;
       }
 
       // 检测右边框
-      if (this.hasBorderOnSide(data, width, height, channels, "right")) {
+      const rightBorderWidth = this.detectBorderEdge(data, width, height, channels, "right", BORDER_CONFIG);
+      if (rightBorderWidth >= BORDER_CONFIG.BORDER_MIN_WIDTH && rightBorderWidth <= BORDER_CONFIG.BORDER_MAX_WIDTH) {
         borderSides.push("right");
-        borderWidth.right = this.measureBorderWidth(
-          data,
-          width,
-          height,
-          channels,
-          "right"
-        );
+        borderWidth.right = rightBorderWidth;
       }
 
       return {
@@ -254,60 +243,144 @@ export class ImageProcessor {
   }
 
   /**
-   * 检测某一侧是否有边框
+   * 检测单条边的边框（与 PC 端一致的算法）
+   * @param data 图片像素数据
+   * @param width 图片宽度
+   * @param height 图片高度
+   * @param channels 颜色通道数
+   * @param side 检测的边（'top', 'bottom', 'left', 'right'）
+   * @param config 边框检测配置
+   * @returns 边框宽度（像素数），如果不存在边框返回0
    */
-  private hasBorderOnSide(
+  private detectBorderEdge(
     data: Buffer,
     width: number,
     height: number,
     channels: number,
-    side: string
-  ): boolean {
-    const threshold = 10; // 像素差异阈值
-    const sampleSize = Math.min(
-      10,
-      side === "top" || side === "bottom" ? width : height
-    );
+    side: "top" | "bottom" | "left" | "right",
+    config: {
+      BORDER_COLOR_TOLERANCE: number;
+      BORDER_CONSISTENCY_RATIO: number;
+      BORDER_BRIGHTNESS_DIFF: number;
+    }
+  ): number {
+    const tolerance = config.BORDER_COLOR_TOLERANCE;
+    const consistencyRatio = config.BORDER_CONSISTENCY_RATIO;
 
-    // 简化：检查边缘像素是否统一（接近纯色）
-    const pixels: number[] = [];
+    // 根据边的位置确定扫描参数
+    let maxScanDepth: number;
+    let getPixelIndex: (depth: number, offset: number) => number;
+    let scanLength: number;
 
-    for (let i = 0; i < sampleSize; i++) {
-      let index = 0;
-      if (side === "top") {
-        index = i * channels;
-      } else if (side === "bottom") {
-        index = (height - 1) * width * channels + i * channels;
-      } else if (side === "left") {
-        index = i * width * channels;
-      } else if (side === "right") {
-        index = i * width * channels + (width - 1) * channels;
-      }
-
-      pixels.push(data[index]);
+    switch (side) {
+      case "top":
+        maxScanDepth = Math.min(height, 50); // 最多扫描50行
+        scanLength = width;
+        getPixelIndex = (depth, offset) => (depth * width + offset) * channels;
+        break;
+      case "bottom":
+        maxScanDepth = Math.min(height, 50);
+        scanLength = width;
+        getPixelIndex = (depth, offset) => ((height - 1 - depth) * width + offset) * channels;
+        break;
+      case "left":
+        maxScanDepth = Math.min(width, 50); // 最多扫描50列
+        scanLength = height;
+        getPixelIndex = (depth, offset) => (offset * width + depth) * channels;
+        break;
+      case "right":
+        maxScanDepth = Math.min(width, 50);
+        scanLength = height;
+        getPixelIndex = (depth, offset) => (offset * width + (width - 1 - depth)) * channels;
+        break;
     }
 
-    // 计算方差，如果很小则认为是边框
-    const avg = pixels.reduce((a, b) => a + b, 0) / pixels.length;
-    const variance =
-      pixels.reduce((sum, val) => sum + Math.pow(val - avg, 2), 0) /
-      pixels.length;
+    let lastLineBrightness: number | null = null;
 
-    return variance < threshold;
+    // 从外向内逐行/列扫描
+    for (let depth = 0; depth < maxScanDepth; depth++) {
+      // 获取当前行/列的所有像素颜色
+      const colors: number[][] = [];
+      for (let offset = 0; offset < scanLength; offset++) {
+        const idx = getPixelIndex(depth, offset);
+        colors.push([data[idx], data[idx + 1], data[idx + 2]]);
+      }
+
+      // 计算当前行/列的平均亮度
+      const currentBrightness = colors.reduce((sum, color) =>
+        sum + (0.299 * color[0] + 0.587 * color[1] + 0.114 * color[2]), 0
+      ) / colors.length;
+
+      // 检查这行/列是否是纯色边框
+      if (this.isSolidColorLine(colors, tolerance, consistencyRatio)) {
+        lastLineBrightness = currentBrightness;
+        continue;
+      } else {
+        // 遇到非纯色行/列
+        if (depth === 0) {
+          // 第一行/列就不是纯色，无边框
+          return 0;
+        }
+
+        // 检查边框与内容的对比度（避免将内部的白色区域误判为边框）
+        if (lastLineBrightness !== null) {
+          const brightnessDiff = Math.abs(currentBrightness - lastLineBrightness);
+          // 如果亮度差异很小，说明不是真正的边界，可能是内部区域
+          if (brightnessDiff < config.BORDER_BRIGHTNESS_DIFF) {
+            return 0;
+          }
+        }
+
+        return depth;
+      }
+    }
+
+    // 如果扫描到最大深度都是纯色，可能不是边框而是大面积纯色区域
+    // 返回0表示不认为是边框
+    return 0;
   }
 
   /**
-   * 测量边框宽度
+   * 检查一行/列像素是否为纯色（与 PC 端一致的算法）
+   * @param colors 像素颜色数组 [[r,g,b], [r,g,b], ...]
+   * @param tolerance 颜色容差
+   * @param consistencyRatio 一致性比例阈值
+   * @returns 是否为纯色
    */
-  private measureBorderWidth(
-    data: Buffer,
-    width: number,
-    height: number,
-    channels: number,
-    side: string
-  ): number {
-    // 简化实现：返回估计值
-    return 1;
+  private isSolidColorLine(
+    colors: number[][],
+    tolerance: number,
+    consistencyRatio: number
+  ): boolean {
+    if (colors.length === 0) return false;
+
+    // 计算平均颜色
+    const avgColor = [0, 0, 0];
+    for (const color of colors) {
+      avgColor[0] += color[0];
+      avgColor[1] += color[1];
+      avgColor[2] += color[2];
+    }
+    avgColor[0] = Math.round(avgColor[0] / colors.length);
+    avgColor[1] = Math.round(avgColor[1] / colors.length);
+    avgColor[2] = Math.round(avgColor[2] / colors.length);
+
+    // 检查有多少像素在容差范围内
+    let consistentPixels = 0;
+    for (const color of colors) {
+      const rDiff = Math.abs(color[0] - avgColor[0]);
+      const gDiff = Math.abs(color[1] - avgColor[1]);
+      const bDiff = Math.abs(color[2] - avgColor[2]);
+
+      // 使用最大色差作为判断标准（允许轻微渐变）
+      if (rDiff <= tolerance && gDiff <= tolerance && bDiff <= tolerance) {
+        consistentPixels++;
+      }
+    }
+
+    // 检查一致性比例是否达到阈值
+    const ratio = consistentPixels / colors.length;
+    return ratio >= consistencyRatio;
   }
 
   /**

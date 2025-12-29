@@ -63,3 +63,21 @@ export const MOBILE_DIMENSION_CONFIG = {
     { ratio: 1, tolerance: 0.05 }, // 正方形 (Instagram裁剪等)
   ],
 };
+
+// 区域重复检测配置
+export const REGIONAL_DUPLICATE_CONFIG = {
+  // 分区网格大小 (3x3 = 9个区域)
+  GRID_SIZE: 3,
+
+  // 静态区域判定阈值：区域在所有图片间的平均相似度 > 此值则判定为静态（固定物体如招牌）
+  STATIC_THRESHOLD: 0.80,
+
+  // 重复物体判定阈值：非静态区域相似度 > 此值则判定为可疑重复
+  DUPLICATE_THRESHOLD: 0.85,
+
+  // 最小静态比例：区域在多少比例的图片对中相似才算静态
+  MIN_STATIC_RATIO: 0.7,
+
+  // 最小图片数量：至少需要多少张图片才进行区域重复检测
+  MIN_IMAGES: 2,
+};

@@ -4,3 +4,20 @@ dist-electron
 release
 *.log
 .DS_Store
+
+# Excel files
+*.xlsx
+*.xls
+~$*
+
+# Test files
+test-*.cjs
+test-*.ts
+
+# Python
+*.py
+__pycache__
+
+# Large model files
+electron/models/*.onnx
+electron/models/*.onnx.data

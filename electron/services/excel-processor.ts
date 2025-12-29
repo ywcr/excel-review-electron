@@ -271,6 +271,9 @@ export class ExcelStreamProcessor {
       blurryImages: 0,
       duplicateImages: 0,
       suspiciousImages: 0,
+      watermarkedImages: 0,
+      seasonMismatchImages: 0,
+      borderImages: 0,
     };
     let imageValidationSkipped = false;
     let imageValidationSkipReason = "";
@@ -378,6 +381,9 @@ export class ExcelStreamProcessor {
       blurryImages: number;
       duplicateImages: number;
       suspiciousImages: number;
+      watermarkedImages: number;
+      seasonMismatchImages: number;
+      borderImages: number;
     };
     isNotWpsFormat?: boolean;
   }> {
@@ -387,6 +393,9 @@ export class ExcelStreamProcessor {
       blurryImages: 0,
       duplicateImages: 0,
       suspiciousImages: 0,
+      watermarkedImages: 0,
+      seasonMismatchImages: 0,
+      borderImages: 0,
     };
 
     try {
@@ -432,6 +441,9 @@ export class ExcelStreamProcessor {
             blurryImages: 0,
             duplicateImages: 0,
             suspiciousImages: 0,
+            watermarkedImages: 0,
+            seasonMismatchImages: 0,
+            borderImages: 0,
           },
           isNotWpsFormat: true,
         };
@@ -458,6 +470,9 @@ export class ExcelStreamProcessor {
       stats.blurryImages = serviceStats.blurryImages;
       stats.duplicateImages = serviceStats.duplicateImages;
       stats.suspiciousImages = serviceStats.suspiciousImages;
+      stats.watermarkedImages = serviceStats.watermarkedImages;
+      stats.seasonMismatchImages = serviceStats.seasonMismatchImages;
+      stats.borderImages = serviceStats.borderImages;
 
       // 4. 处理结果
       for (const { index, result, thumbnail } of results) {
@@ -482,6 +497,32 @@ export class ExcelStreamProcessor {
         if (result.isDuplicate) {
           const duplicateOfDesc =
             result.duplicateOfPosition || `图片 #${result.duplicateOf}`;
+          
+          // 获取原图的缩略图数据（用于左右对比）
+          let duplicateOfImageData: string | undefined;
+          if (result.duplicateOf !== undefined) {
+            const originalResult = results.find(r => r.index === result.duplicateOf);
+            if (originalResult?.thumbnail?.data) {
+              // 原图已有缩略图
+              duplicateOfImageData = originalResult.thumbnail.data;
+            } else {
+              // 原图没有缩略图（可能因为原图本身没有问题），需要现场生成
+              try {
+                const originalImageInfo = imagesToProc[result.duplicateOf];
+                if (originalImageInfo?.buffer) {
+                  const originalThumbnail = await this.imageValidationService.imageValidator.imageProcessor.createThumbnail(
+                    originalImageInfo.buffer
+                  );
+                  if (originalThumbnail) {
+                    duplicateOfImageData = originalThumbnail.data;
+                  }
+                }
+              } catch (err) {
+                console.warn(`[重复图片对比] 生成原图缩略图失败:`, err);
+              }
+            }
+          }
+          
           errors.push({
             row: imageInfo.row || 0,
             column: imageInfo.column || "",
@@ -492,6 +533,7 @@ export class ExcelStreamProcessor {
             details: {
               duplicateOf: result.duplicateOf,
               duplicateOfPosition: result.duplicateOfPosition,
+              duplicateOfImageData,
             },
             imageData: thumbnail?.data,
             mimeType: thumbnail?.mimeType,
@@ -509,6 +551,65 @@ export class ExcelStreamProcessor {
             details: {
               suspicionScore: result.suspicionScore,
               suspicionLevel: result.suspicionLevel,
+            },
+            imageData: thumbnail?.data,
+            mimeType: thumbnail?.mimeType,
+          });
+        }
+
+        // 水印检测
+        if (result.hasWatermark) {
+          errors.push({
+            row: imageInfo.row || 0,
+            column: imageInfo.column || "",
+            field: "图片",
+            imageIndex: index,
+            errorType: "watermark",
+            message: `检测到水印 (置信度: ${result.watermarkConfidence.toFixed(0)}%)`,
+            details: {
+              watermarkConfidence: result.watermarkConfidence,
+            },
+            imageData: thumbnail?.data,
+            mimeType: thumbnail?.mimeType,
+          });
+        }
+
+        // 季节不符检测
+        if (!result.seasonMatchesCurrent && result.detectedSeason !== "unknown") {
+          errors.push({
+            row: imageInfo.row || 0,
+            column: imageInfo.column || "",
+            field: "图片",
+            imageIndex: index,
+            errorType: "seasonMismatch",
+            message: result.seasonMismatchReason || `图片季节不符 (检测为${result.detectedSeason})`,
+            details: {
+              detectedSeason: result.detectedSeason,
+              seasonMismatchReason: result.seasonMismatchReason,
+            },
+            imageData: thumbnail?.data,
+            mimeType: thumbnail?.mimeType,
+          });
+        }
+
+        // 边框检测
+        if (result.hasBorder && result.borderSides.length > 0) {
+          const sideNames: Record<string, string> = { top: "上", bottom: "下", left: "左", right: "右" };
+          const borderDesc = result.borderSides.map(side => {
+            const width = result.borderWidth[side];
+            return `${sideNames[side] || side}${width ? `(${width}px)` : ""}`;
+          }).join("、");
+          
+          errors.push({
+            row: imageInfo.row || 0,
+            column: imageInfo.column || "",
+            field: "图片",
+            imageIndex: index,
+            errorType: "border",
+            message: `存在边框 (${borderDesc})`,
+            details: {
+              borderSides: result.borderSides,
+              borderWidth: result.borderWidth,
             },
             imageData: thumbnail?.data,
             mimeType: thumbnail?.mimeType,

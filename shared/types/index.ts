@@ -14,15 +14,27 @@ export interface ImageValidationError {
   column?: string;
   field?: string;
   imageIndex: number;
-  errorType: "blur" | "duplicate" | "suspicious";
+  errorType: "blur" | "duplicate" | "suspicious" | "watermark" | "seasonMismatch" | "border";
   message: string;
   details?: {
     blurScore?: number;
     duplicateOf?: number;
     /** 重复图片的位置，如 "行5 列M" */
     duplicateOfPosition?: string;
+    /** 重复图片的缩略图数据（用于对比预览） */
+    duplicateOfImageData?: string;
     suspicionScore?: number;
     suspicionLevel?: string;
+    /** 水印检测置信度 */
+    watermarkConfidence?: number;
+    /** 检测到的季节 */
+    detectedSeason?: string;
+    /** 季节不符原因 */
+    seasonMismatchReason?: string;
+    /** 边框位置（上/下/左/右） */
+    borderSides?: string[];
+    /** 边框宽度 */
+    borderWidth?: Record<string, number>;
   };
   /** Base64 编码的缩略图数据（用于预览） */
   imageData?: string;
@@ -39,6 +51,9 @@ export interface ValidationSummary {
     blurryImages: number;
     duplicateImages: number;
     suspiciousImages: number;
+    watermarkedImages: number;
+    seasonMismatchImages: number;
+    borderImages: number;
   };
   /** 图片验证是否被跳过 */
   imageValidationSkipped?: boolean;

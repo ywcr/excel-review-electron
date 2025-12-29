@@ -18,6 +18,7 @@
     "electron-updater": "^6.1.7",
     "exceljs": "^4.4.0",
     "jszip": "^3.10.1",
+    "onnxruntime-node": "^1.23.2",
     "p-limit": "^7.2.0",
     "sharp": "^0.34.5",
     "yauzl": "^3.2.0"
@@ -51,7 +52,15 @@
       "dist-electron"
     ],
     "asarUnpack": [
-      "node_modules/sharp/**/*"
+      "node_modules/sharp/**/*",
+      "node_modules/onnxruntime-node/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "electron/models",
+        "to": "models",
+        "filter": ["**/*.onnx", "**/*.json"]
+      }
     ],
     "mac": {
       "target": [

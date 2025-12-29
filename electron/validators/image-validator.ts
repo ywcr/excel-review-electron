@@ -1,5 +1,5 @@
 /**
- * 图片验证器 - 整合模糊检测、重复检测、可疑度评分
+ * 图片验证器 - 整合模糊检测、重复检测、可疑度评分、水印检测、季节检测
  * 使用与 PC Worker 完全一致的 bmvbhash 算法
  */
 import { ImageProcessor } from "../services/image-processor";
@@ -11,6 +11,8 @@ import {
   calculateBlockhash,
   calculateHammingDistanceHex,
 } from "../services/blockhash";
+import { getClipDetector, Season } from "../services/clip-detector";
+import { SeasonValidator } from "./season-validator";
 
 export interface ImageValidationResult {
   isBlurry: boolean;
@@ -30,6 +32,18 @@ export interface ImageValidationResult {
     size: number;
     megapixels: number;
   };
+  // 水印检测
+  hasWatermark: boolean;
+  watermarkConfidence: number;
+  // 边框检测
+  hasBorder: boolean;
+  borderSides: string[];
+  borderWidth: Record<string, number>;
+  // 季节检测
+  detectedSeason: Season;
+  seasonMatchesCurrent: boolean;
+  seasonMismatchReason?: string;
+  seasonConfidence: number;
 }
 
 export class ImageValidator {
@@ -88,7 +102,32 @@ export class ImageValidator {
     // 5. 边框检测
     const borderResult = await this.imageProcessor.detectBorder(imageBuffer);
 
-    // 6. 可疑度评分（简化版）
+    // 6. CLIP 检测（水印 + 季节）
+    let hasWatermark = false;
+    let watermarkConfidence = 0;
+    let detectedSeason: Season = "unknown";
+    let seasonMatchesCurrent = true;
+    let seasonMismatchReason: string | undefined;
+    let seasonConfidence = 0;
+
+    // 预筛选：只对足够大的图片进行 CLIP 检测
+    const shouldCheckWithClip = SeasonValidator.shouldCheckSeason(metadata);
+    if (shouldCheckWithClip) {
+      const clipDetector = getClipDetector();
+      const clipResult = await clipDetector.detect(imageBuffer);
+      if (clipResult) {
+        hasWatermark = clipResult.hasWatermark;
+        watermarkConfidence = clipResult.watermarkConfidence;
+        detectedSeason = clipResult.detectedSeason;
+        seasonConfidence = clipResult.seasonConfidence;
+
+        const seasonValidation = SeasonValidator.validate(clipResult);
+        seasonMatchesCurrent = seasonValidation.matchesCurrent;
+        seasonMismatchReason = seasonValidation.mismatchReason;
+      }
+    }
+
+    // 7. 可疑度评分（简化版）
     const suspicionResult = this.calculateSuspicionScore({
       width: metadata.width,
       height: metadata.height,
@@ -99,9 +138,9 @@ export class ImageValidator {
       hasBorder: borderResult.hasBorder,
       borderSides: borderResult.borderSides,
       borderWidth: borderResult.borderWidth,
-      hasWatermark: false, // 暂未实现水印检测
+      hasWatermark,
       watermarkRegions: [],
-      watermarkConfidence: 0,
+      watermarkConfidence,
     });
 
     return {
@@ -121,6 +160,15 @@ export class ImageValidator {
         size: metadata.size,
         megapixels: metadata.megapixels,
       },
+      hasWatermark,
+      watermarkConfidence,
+      hasBorder: borderResult.hasBorder,
+      borderSides: borderResult.borderSides,
+      borderWidth: borderResult.borderWidth,
+      detectedSeason,
+      seasonMatchesCurrent,
+      seasonMismatchReason,
+      seasonConfidence,
     };
   }
 
@@ -180,12 +228,45 @@ export class ImageValidator {
       throw new Error("Failed to read image metadata");
     }
 
+    // 模糊判断（Laplacian 方法）
     const isBlurry = blurScore < this.BLUR_THRESHOLD;
 
     // 2. 检测重复（使用预计算的哈希）
     const duplicateResult = this.checkDuplicate(precomputedHash, imageIndex);
 
-    // 3. 可疑度评分
+    // 3. CLIP 检测（水印 + 季节）
+    let hasWatermark = false;
+    let watermarkConfidence = 0;
+    let detectedSeason: Season = "unknown";
+    let seasonMatchesCurrent = true;
+    let seasonMismatchReason: string | undefined;
+    let seasonConfidence = 0;
+
+    // 预筛选：只对足够大的图片进行 CLIP 检测
+    const shouldCheckWithClip = SeasonValidator.shouldCheckSeason(metadata);
+    console.log(`🖼️ [图片 #${imageIndex}] 尺寸: ${metadata.width}x${metadata.height}, 预筛选: ${shouldCheckWithClip ? '通过' : '跳过'}`);
+    
+    if (shouldCheckWithClip) {
+      const clipDetector = getClipDetector();
+      console.log(`🔍 [图片 #${imageIndex}] 开始 CLIP 检测...`);
+      const clipResult = await clipDetector.detect(imageBuffer);
+      if (clipResult) {
+        hasWatermark = clipResult.hasWatermark;
+        watermarkConfidence = clipResult.watermarkConfidence;
+        detectedSeason = clipResult.detectedSeason;
+        seasonConfidence = clipResult.seasonConfidence;
+
+        const seasonValidation = SeasonValidator.validate(clipResult);
+        seasonMatchesCurrent = seasonValidation.matchesCurrent;
+        seasonMismatchReason = seasonValidation.mismatchReason;
+        
+        console.log(`✅ [图片 #${imageIndex}] CLIP 结果: 水印=${hasWatermark}, 季节=${detectedSeason}, 季节匹配=${seasonMatchesCurrent}`);
+      } else {
+        console.log(`⚠️ [图片 #${imageIndex}] CLIP 检测返回 null（模型可能未初始化）`);
+      }
+    }
+
+    // 4. 可疑度评分
     const suspicionResult = this.calculateSuspicionScore({
       width: metadata.width,
       height: metadata.height,
@@ -196,9 +277,9 @@ export class ImageValidator {
       hasBorder: borderResult.hasBorder,
       borderSides: borderResult.borderSides,
       borderWidth: borderResult.borderWidth,
-      hasWatermark: false,
+      hasWatermark,
       watermarkRegions: [],
-      watermarkConfidence: 0,
+      watermarkConfidence,
     });
 
     return {
@@ -218,6 +299,15 @@ export class ImageValidator {
         size: metadata.size,
         megapixels: metadata.megapixels,
       },
+      hasWatermark,
+      watermarkConfidence,
+      hasBorder: borderResult.hasBorder,
+      borderSides: borderResult.borderSides,
+      borderWidth: borderResult.borderWidth,
+      detectedSeason,
+      seasonMatchesCurrent,
+      seasonMismatchReason,
+      seasonConfidence,
     };
   }
 

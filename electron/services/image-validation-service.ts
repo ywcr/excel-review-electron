@@ -1,6 +1,11 @@
 import pLimit from "p-limit";
 import * as os from "os";
 import { ImageValidator, ImageValidationResult } from "../validators/image-validator";
+import {
+  getRegionalDuplicateDetector,
+  resetRegionalDuplicateDetector,
+  RegionalDuplicateResult,
+} from "./regional-duplicate-detector";
 
 interface WpsImage {
   buffer: Buffer;
@@ -9,7 +14,7 @@ interface WpsImage {
 }
 
 export class ImageValidationService {
-  private imageValidator: ImageValidator;
+  public imageValidator: ImageValidator;
   private isCancelled = false;
 
   constructor() {
@@ -37,12 +42,18 @@ export class ImageValidationService {
       blurryImages: number;
       duplicateImages: number;
       suspiciousImages: number;
+      watermarkedImages: number;
+      seasonMismatchImages: number;
+      borderImages: number;
     };
   }> {
     const stats = {
       blurryImages: 0,
       duplicateImages: 0,
       suspiciousImages: 0,
+      watermarkedImages: 0,
+      seasonMismatchImages: 0,
+      borderImages: 0,
     };
     const results: Array<{ index: number; result: ImageValidationResult; thumbnail?: { data: string; mimeType: string } }> = [];
 
@@ -102,19 +113,13 @@ export class ImageValidationService {
             // Original code: thumbnail: { data: string; mimeType: string } | null
             // imageProcessor.createThumbnail returns Promise<{ data: string; mimeType: string }>
             
-            const hasError = result.isBlurry || result.isDuplicate || result.suspicionScore >= 40;
+            // 检测是否有问题（包含水印、季节不符、边框）
+            const hasError = result.isBlurry || result.isDuplicate || result.suspicionScore >= 40 || 
+                            result.hasWatermark || !result.seasonMatchesCurrent || result.hasBorder;
             if (hasError) {
               const thumb = await this.imageValidator.imageProcessor.createThumbnail(image.buffer);
-              thumbnail = thumb.data; // Store base64 data directly for simplicity or keep object?
-              // The caller needs to put it into error.imageData
+              thumbnail = thumb.data;
             }
-            // Wait, looking at `ImageValidationError` in types: imageData?: string
-            // So just the base64 string is fine?
-            // Original code in excel-processor.ts constructed error:
-            // imageData: item.thumbnail ? item.thumbnail.data : undefined,
-            // mimeType: item.thumbnail ? item.thumbnail.mimeType : undefined,
-            
-            // I should return the whole object { data, mimeType } then.
 
             let thumbnailObj: { data: string; mimeType: string } | undefined = undefined;
             if (hasError) {
@@ -125,6 +130,9 @@ export class ImageValidationService {
             if (result.isBlurry) stats.blurryImages++;
             if (result.isDuplicate) stats.duplicateImages++;
             if (result.suspicionScore >= 40) stats.suspiciousImages++;
+            if (result.hasWatermark) stats.watermarkedImages++;
+            if (!result.seasonMatchesCurrent && result.detectedSeason !== "unknown") stats.seasonMismatchImages++;
+            if (result.hasBorder) stats.borderImages++;
 
             completedCount++;
             if (completedCount % 10 === 0 || completedCount === images.length) {
@@ -153,5 +161,62 @@ export class ImageValidationService {
     }
 
     return { results, stats };
+  }
+
+  /**
+   * 执行区域重复检测
+   * 检测多张图片中重复出现的相同物体/人物（排除固定招牌）
+   * 
+   * @param images 要检测的图片数组
+   * @param onProgress 进度回调
+   * @returns 区域重复检测结果
+   */
+  async validateRegionalDuplicates(
+    images: WpsImage[],
+    onProgress?: (progress: number, message: string) => void
+  ): Promise<RegionalDuplicateResult> {
+    // 重置检测器
+    resetRegionalDuplicateDetector();
+    const detector = getRegionalDuplicateDetector();
+
+    if (images.length < 2) {
+      return {
+        hasDuplicate: false,
+        staticRegions: [],
+        duplicates: [],
+        totalImages: images.length,
+      };
+    }
+
+    try {
+      console.log(`🔳 [区域检测] 开始分析 ${images.length} 张图片...`);
+      onProgress?.(0, `正在分析区域特征 (0/${images.length})...`);
+
+      // 添加所有图片
+      for (let i = 0; i < images.length; i++) {
+        if (this.isCancelled) {
+          throw new Error("Regional detection cancelled");
+        }
+
+        await detector.addImage(
+          images[i].buffer,
+          i,
+          images[i].positionDesc
+        );
+
+        const progress = Math.floor(((i + 1) / images.length) * 80);
+        onProgress?.(progress, `正在分析区域特征 (${i + 1}/${images.length})...`);
+      }
+
+      // 执行检测
+      onProgress?.(85, "正在检测可疑重复...");
+      const result = detector.detectDuplicates();
+
+      onProgress?.(100, `检测完成: ${result.duplicates.length} 个可疑重复`);
+      return result;
+    } catch (error) {
+      console.error("区域重复检测失败:", error);
+      throw error;
+    }
   }
 }

@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { ImageModal } from "./ImagePreview";
+import { DuplicateCompareModal } from "./DuplicateCompareModal";
 import { GhostButton, OutlineButton } from "./UI/Buttons";
 import type { ValidationError, ImageValidationError, ValidationResult } from "../../shared/types";
 
@@ -29,6 +30,9 @@ const IMAGE_ERROR_TYPE_LABELS: Record<string, string> = {
   blur: "模糊",
   duplicate: "重复",
   suspicious: "可疑",
+  watermark: "水印",
+  seasonMismatch: "季节不符",
+  border: "边框",
 };
 
 export function ValidationResults({
@@ -38,26 +42,56 @@ export function ValidationResults({
   onExport,
 }: ValidationResultsProps) {
   const [filterType, setFilterType] = useState<string>("all");
+  const [imageFilterType, setImageFilterType] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
+  const [imageCurrentPage, setImageCurrentPage] = useState(1);
   // 图片预览状态
   const [previewImage, setPreviewImage] = useState<ImageValidationError | null>(
     null
   );
+  // 重复图片对比状态
+  const [compareImage, setCompareImage] = useState<ImageValidationError | null>(
+    null
+  );
   const errorsPerPage = 20;
+  const imageErrorsPerPage = 20;
 
   const { errors, summary, imageErrors } = result;
 
-  // 排序后的图片错误：重复错误排在最前面
-  const sortedImageErrors = useMemo(() => {
+  // 图片错误类型优先级（用于排序）
+  // 重复、边框、水印、季节不符 优先显示
+  const IMAGE_ERROR_TYPE_ORDER: Record<string, number> = {
+    duplicate: 1,
+    border: 2,
+    watermark: 3,
+    seasonMismatch: 4,
+    blur: 5,
+    suspicious: 6,
+  };
+
+  // 获取唯一的图片错误类型
+  const imageErrorTypes = useMemo(() => {
     if (!imageErrors) return [];
-    return [...imageErrors].sort((a, b) => {
-      // duplicate 排在最前面
-      if (a.errorType === "duplicate" && b.errorType !== "duplicate") return -1;
-      if (a.errorType !== "duplicate" && b.errorType === "duplicate") return 1;
-      // 其次按图片索引排序
+    return Array.from(new Set(imageErrors.map((e) => e.errorType)));
+  }, [imageErrors]);
+
+  // 排序并筛选后的图片错误
+  const filteredAndSortedImageErrors = useMemo(() => {
+    if (!imageErrors) return [];
+    
+    // 先筛选
+    const filtered = imageFilterType === "all" 
+      ? imageErrors 
+      : imageErrors.filter(e => e.errorType === imageFilterType);
+    
+    // 再排序：按类型优先级分组，同类型内按图片索引排序
+    return [...filtered].sort((a, b) => {
+      const orderA = IMAGE_ERROR_TYPE_ORDER[a.errorType] || 99;
+      const orderB = IMAGE_ERROR_TYPE_ORDER[b.errorType] || 99;
+      if (orderA !== orderB) return orderA - orderB;
       return a.imageIndex - b.imageIndex;
     });
-  }, [imageErrors]);
+  }, [imageErrors, imageFilterType]);
 
   // 获取唯一的错误类型
   const errorTypes = Array.from(new Set(errors.map((e) => e.errorType)));
@@ -176,7 +210,7 @@ export function ValidationResults({
           <h4 className="text-sm font-semibold text-zinc-900 mb-4 flex items-center gap-2">
             📷 图片验证统计
           </h4>
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-6 gap-4">
             <div className="bg-zinc-50 rounded p-3 text-center border border-zinc-100">
               <span className="block text-xl font-bold text-zinc-900">{summary.imageStats.totalImages}</span>
               <span className="text-[10px] font-bold text-zinc-500 uppercase">总数</span>
@@ -192,6 +226,18 @@ export function ValidationResults({
             <div className="bg-zinc-50 rounded p-3 text-center border border-zinc-100">
               <span className="block text-xl font-bold text-zinc-700">{summary.imageStats.suspiciousImages}</span>
               <span className="text-[10px] font-bold text-zinc-500 uppercase">可疑</span>
+            </div>
+            <div className="bg-purple-50/50 rounded p-3 text-center border border-purple-100/50">
+              <span className="block text-xl font-bold text-purple-700">{summary.imageStats.watermarkedImages || 0}</span>
+              <span className="text-[10px] font-bold text-purple-600/70 uppercase">水印</span>
+            </div>
+            <div className="bg-blue-50/50 rounded p-3 text-center border border-blue-100/50">
+              <span className="block text-xl font-bold text-blue-700">{summary.imageStats.seasonMismatchImages || 0}</span>
+              <span className="text-[10px] font-bold text-blue-600/70 uppercase">季节不符</span>
+            </div>
+            <div className="bg-rose-50/50 rounded p-3 text-center border border-rose-100/50">
+              <span className="block text-xl font-bold text-rose-700">{summary.imageStats.borderImages || 0}</span>
+              <span className="text-[10px] font-bold text-rose-600/70 uppercase">边框</span>
             </div>
           </div>
         </div>
@@ -298,10 +344,31 @@ export function ValidationResults({
         </div>
       )}
 
-      {/* 图片错误详情 - 重复的排在最前面 */}
-      {sortedImageErrors.length > 0 && (
+      {/* 图片错误详情 - 按类型分组排序，支持筛选 */}
+      {(imageErrors?.length ?? 0) > 0 && (
         <div className="space-y-4 pt-8 border-t border-zinc-200">
-          <h3 className="text-sm font-semibold text-zinc-900">图片错误</h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-zinc-900">图片错误</h3>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-zinc-500">筛选：</span>
+              <select
+                value={imageFilterType}
+                onChange={(e) => {
+                  setImageFilterType(e.target.value);
+                  setImageCurrentPage(1);
+                }}
+                className="bg-transparent border-none text-xs font-medium text-zinc-900 focus:ring-0 cursor-pointer hover:bg-zinc-50 rounded py-1 px-2"
+              >
+                <option value="all">全部类型 ({imageErrors?.length || 0})</option>
+                {imageErrorTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {IMAGE_ERROR_TYPE_LABELS[type] || type} ({imageErrors?.filter((e) => e.errorType === type).length})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          
           <div className="overflow-x-auto border-t border-zinc-200">
             <table className="w-full text-left border-collapse">
               <thead>
@@ -314,7 +381,9 @@ export function ValidationResults({
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100 font-mono text-sm">
-                {sortedImageErrors.map((err, idx) => (
+                {filteredAndSortedImageErrors
+                  .slice((imageCurrentPage - 1) * imageErrorsPerPage, imageCurrentPage * imageErrorsPerPage)
+                  .map((err, idx) => (
                   <tr key={idx} className="group hover:bg-zinc-50 transition-colors">
                     <td className="py-3 px-4 text-zinc-500">#{err.imageIndex}</td>
                     <td className="py-3 px-4 text-zinc-900">
@@ -325,6 +394,9 @@ export function ValidationResults({
                       <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${
                         err.errorType === 'blur' ? 'bg-red-50 text-red-700 border-red-100' : 
                         err.errorType === 'duplicate' ? 'bg-amber-50 text-amber-700 border-amber-100' :
+                        err.errorType === 'border' ? 'bg-rose-50 text-rose-700 border-rose-100' :
+                        err.errorType === 'watermark' ? 'bg-purple-50 text-purple-700 border-purple-100' :
+                        err.errorType === 'seasonMismatch' ? 'bg-blue-50 text-blue-700 border-blue-100' :
                         'bg-zinc-100 text-zinc-700 border-zinc-200'
                       }`}>
                         {IMAGE_ERROR_TYPE_LABELS[err.errorType] || err.errorType}
@@ -341,25 +413,67 @@ export function ValidationResults({
                             与 {err.details.duplicateOfPosition || `图片 #${err.details.duplicateOf}`} 重复
                           </span>
                         )}
+                        {err.details?.watermarkConfidence !== undefined && (
+                          <span className="text-xs text-purple-500">水印置信度: {err.details.watermarkConfidence.toFixed(0)}%</span>
+                        )}
+                        {err.details?.seasonMismatchReason && (
+                          <span className="text-xs text-blue-500">{err.details.seasonMismatchReason}</span>
+                        )}
                       </div>
                     </td>
                     <td className="py-3 px-4 text-right">
-                      {err.imageData ? (
-                        <button
-                          onClick={() => setPreviewImage(err)}
-                          className="text-xs font-medium text-zinc-900 hover:text-blue-600 hover:underline cursor-pointer transition-colors"
-                        >
-                          查看
-                        </button>
-                      ) : (
-                        <span className="text-zinc-300">-</span>
-                      )}
+                      <div className="flex items-center justify-end gap-2">
+                        {/* 重复图片对比按钮 */}
+                        {err.errorType === 'duplicate' && err.imageData && err.details?.duplicateOfImageData && (
+                          <button
+                            onClick={() => setCompareImage(err)}
+                            className="text-xs font-medium text-amber-600 hover:text-amber-700 hover:underline cursor-pointer transition-colors"
+                          >
+                            对比
+                          </button>
+                        )}
+                        {err.imageData ? (
+                          <button
+                            onClick={() => setPreviewImage(err)}
+                            className="text-xs font-medium text-zinc-900 hover:text-blue-600 hover:underline cursor-pointer transition-colors"
+                          >
+                            查看
+                          </button>
+                        ) : (
+                          <span className="text-zinc-300">-</span>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+
+          {/* 图片错误分页 */}
+          {Math.ceil(filteredAndSortedImageErrors.length / imageErrorsPerPage) > 1 && (
+            <div className="flex items-center justify-between pt-4 border-t border-zinc-100">
+              <span className="text-xs text-zinc-400">
+                显示 {(imageCurrentPage - 1) * imageErrorsPerPage + 1}-{Math.min(imageCurrentPage * imageErrorsPerPage, filteredAndSortedImageErrors.length)} 条，共 {filteredAndSortedImageErrors.length} 条
+              </span>
+              <div className="flex gap-2">
+                <OutlineButton
+                  onClick={() => setImageCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={imageCurrentPage === 1}
+                  className="h-8 px-3 py-0 text-xs"
+                >
+                  上一页
+                </OutlineButton>
+                <OutlineButton
+                  onClick={() => setImageCurrentPage((p) => Math.min(Math.ceil(filteredAndSortedImageErrors.length / imageErrorsPerPage), p + 1))}
+                  disabled={imageCurrentPage === Math.ceil(filteredAndSortedImageErrors.length / imageErrorsPerPage)}
+                  className="h-8 px-3 py-0 text-xs"
+                >
+                  下一页
+                </OutlineButton>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -384,6 +498,23 @@ export function ValidationResults({
         />
       )}
 
+      {/* 重复图片对比模态框 */}
+      {compareImage && compareImage.imageData && compareImage.details?.duplicateOfImageData && (
+        <DuplicateCompareModal
+          isOpen={!!compareImage}
+          onClose={() => setCompareImage(null)}
+          leftImage={{
+            imageData: compareImage.imageData,
+            position: `行${compareImage.row}${compareImage.column ? ` 列${compareImage.column}` : ""}`,
+            imageIndex: compareImage.imageIndex,
+          }}
+          rightImage={{
+            imageData: compareImage.details.duplicateOfImageData,
+            position: compareImage.details.duplicateOfPosition || `图片 #${compareImage.details.duplicateOf}`,
+            imageIndex: compareImage.details.duplicateOf || 0,
+          }}
+        />
+      )}
       {/* 验证通过提示 */}
       {result.isValid && errors.length === 0 && (
         <div className="bg-green-50 rounded-lg p-8 text-center border border-green-100">
