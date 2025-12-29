@@ -32,9 +32,11 @@ export interface ClipDetectionResult {
   rawScores?: Record<string, number>;
 }
 
-// 检测 prompts
+// 检测 prompts - 增强透明水印检测
 const WATERMARK_PROMPTS = [
   "a photo with visible watermark or logo overlay",
+  "a photo with semi-transparent text or logo watermark",
+  "a photo with faint watermark in the corner",
   "a clean photo without any watermark",
 ];
 
@@ -92,7 +94,11 @@ export class ClipDetector {
   async initialize(): Promise<boolean> {
     if (this.isInitialized) return true;
 
-    const visualModelPath = path.join(this.modelDir, "clip-visual.onnx");
+    // 优先使用 FP16 量化模型（更小），否则使用原始模型
+    let visualModelPath = path.join(this.modelDir, "clip-visual-fp16.onnx");
+    if (!fs.existsSync(visualModelPath)) {
+      visualModelPath = path.join(this.modelDir, "clip-visual.onnx");
+    }
     const textModelPath = path.join(this.modelDir, "clip-textual.onnx");
     const embeddingsPath = path.join(this.modelDir, "text-embeddings.json");
 
