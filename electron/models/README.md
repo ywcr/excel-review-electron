@@ -1,13 +1,14 @@
-# CLIP 模型设置指南
+# 模型设置指南
 
-本项目使用 OpenAI CLIP 模型进行水印检测和季节识别。需要手动下载或转换模型文件。
+本项目使用 CLIP 模型进行水印检测和季节识别，YOLO 模型进行物体检测。
 
 ## 模型文件结构
 
 ```
 electron/models/
-├── clip-visual.onnx        # CLIP 视觉编码器 (~350MB)
-└── text-embeddings.json    # 预计算的文本嵌入 (~100KB)
+├── clip-visual-fp16.onnx   # CLIP 视觉编码器 FP16 量化版 (~170MB)
+├── text-embeddings.json    # 预计算的文本嵌入 (~180KB)
+└── yolov8s.onnx            # YOLOv8s 物体检测模型 (~44MB)
 ```
 
 ## 方式一：使用预转换的 ONNX 模型
@@ -50,7 +51,7 @@ class VisualEncoder(torch.nn.Module):
         super().__init__()
         self.vision_model = clip_model.vision_model
         self.visual_projection = clip_model.visual_projection
-    
+
     def forward(self, pixel_values):
         vision_outputs = self.vision_model(pixel_values)
         image_embeds = vision_outputs.pooler_output
@@ -116,6 +117,7 @@ print("Text embeddings saved!")
 ## 验证模型
 
 启动应用后，查看控制台日志：
+
 - `✅ CLIP detector initialized successfully` = 模型加载成功
 - `⚠️ CLIP visual model not found` = 模型文件缺失
 
