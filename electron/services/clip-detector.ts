@@ -92,7 +92,7 @@ export class ClipDetector {
   async initialize(): Promise<boolean> {
     if (this.isInitialized) return true;
 
-    const visualModelPath = path.join(this.modelDir, "clip-visual.onnx");
+    const visualModelPath = path.join(this.modelDir, "clip-visual-fp16.onnx");
     const textModelPath = path.join(this.modelDir, "clip-textual.onnx");
     const embeddingsPath = path.join(this.modelDir, "text-embeddings.json");
 

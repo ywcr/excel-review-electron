@@ -14,10 +14,10 @@ release
 test-*.cjs
 test-*.ts
 
-# Python
+# Python (exclude scripts directory)
 *.py
+!scripts/*.py
 __pycache__
 
-# Large model files
-electron/models/*.onnx
+# Large model files (only ignore external data files)
 electron/models/*.onnx.data
