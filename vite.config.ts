@@ -10,10 +10,10 @@ const nativeModules = [
   "exceljs",
   "sharp",
   "jszip",
-  "onnxruntime-node",
   ...builtinModules,
   ...builtinModules.map((m) => `node:${m}`),
 ];
+
 
 export default defineConfig({
   plugins: [
@@ -33,12 +33,7 @@ export default defineConfig({
               external: nativeModules,
             },
           },
-          resolve: {
-            // Resolve native modules to external
-            alias: {
-              "onnxruntime-node": "onnxruntime-node",
-            },
-          },
+
         },
       },
       {

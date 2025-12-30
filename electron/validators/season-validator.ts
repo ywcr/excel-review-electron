@@ -1,8 +1,20 @@
 /**
  * 季节一致性验证器
  * 判断图片内容是否符合当前季节（中国北方）
+ * 
+ * 注意：已移除 CLIP 模型依赖，validate 方法需要手动传入季节信息
  */
-import { Season, ClipDetectionResult } from "../services/clip-detector";
+
+// 季节类型定义（原从 clip-detector 导入，现本地定义）
+export type Season = "spring" | "summer" | "autumn" | "winter" | "unknown";
+
+// CLIP 检测结果接口（简化版，用于类型兼容）
+export interface ClipDetectionResult {
+  detectedSeason: Season;
+  seasonConfidence: number;
+  clothingSeason?: Season;
+  scenerySeason?: Season;
+}
 
 // 中国北方季节月份映射
 const SEASON_MONTHS: Record<Season, number[]> = {

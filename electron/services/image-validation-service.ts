@@ -1,11 +1,24 @@
 import pLimit from "p-limit";
 import * as os from "os";
 import { ImageValidator, ImageValidationResult } from "../validators/image-validator";
-import {
-  getRegionalDuplicateDetector,
-  resetRegionalDuplicateDetector,
-  RegionalDuplicateResult,
-} from "./regional-duplicate-detector";
+
+// 区域重复检测结果接口（原从 regional-duplicate-detector 导入，现本地定义）
+export interface RegionalDuplicateMatch {
+  regionIndex: number;
+  regionName: string;
+  image1Index: number;
+  image2Index: number;
+  image1Position?: string;
+  image2Position?: string;
+  similarity: number;
+}
+
+export interface RegionalDuplicateResult {
+  hasDuplicate: boolean;
+  staticRegions: number[];
+  duplicates: RegionalDuplicateMatch[];
+  totalImages: number;
+}
 
 interface WpsImage {
   buffer: Buffer;
@@ -164,59 +177,28 @@ export class ImageValidationService {
   }
 
   /**
-   * 执行区域重复检测
+   * 执行区域重复检测（已禁用 - 需要 CLIP 模型）
    * 检测多张图片中重复出现的相同物体/人物（排除固定招牌）
    * 
    * @param images 要检测的图片数组
    * @param onProgress 进度回调
-   * @returns 区域重复检测结果
+   * @returns 区域重复检测结果（始终返回空结果，因为 CLIP 模型已移除）
    */
   async validateRegionalDuplicates(
     images: WpsImage[],
     onProgress?: (progress: number, message: string) => void
   ): Promise<RegionalDuplicateResult> {
-    // 重置检测器
-    resetRegionalDuplicateDetector();
-    const detector = getRegionalDuplicateDetector();
-
-    if (images.length < 2) {
-      return {
-        hasDuplicate: false,
-        staticRegions: [],
-        duplicates: [],
-        totalImages: images.length,
-      };
-    }
-
-    try {
-      console.log(`🔳 [区域检测] 开始分析 ${images.length} 张图片...`);
-      onProgress?.(0, `正在分析区域特征 (0/${images.length})...`);
-
-      // 添加所有图片
-      for (let i = 0; i < images.length; i++) {
-        if (this.isCancelled) {
-          throw new Error("Regional detection cancelled");
-        }
-
-        await detector.addImage(
-          images[i].buffer,
-          i,
-          images[i].positionDesc
-        );
-
-        const progress = Math.floor(((i + 1) / images.length) * 80);
-        onProgress?.(progress, `正在分析区域特征 (${i + 1}/${images.length})...`);
-      }
-
-      // 执行检测
-      onProgress?.(85, "正在检测可疑重复...");
-      const result = detector.detectDuplicates();
-
-      onProgress?.(100, `检测完成: ${result.duplicates.length} 个可疑重复`);
-      return result;
-    } catch (error) {
-      console.error("区域重复检测失败:", error);
-      throw error;
-    }
+    // CLIP 模型已移除，区域重复检测已禁用
+    // 返回空结果
+    console.log(`⚠️ [区域检测] 区域重复检测已禁用（CLIP 模型已移除）`);
+    onProgress?.(100, "区域检测已禁用");
+    
+    return {
+      hasDuplicate: false,
+      staticRegions: [],
+      duplicates: [],
+      totalImages: images.length,
+    };
   }
+
 }
