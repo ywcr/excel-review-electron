@@ -7,9 +7,7 @@ import { builtinModules } from "module";
 // Native modules that should not be bundled
 const nativeModules = [
   "electron",
-  "exceljs",
   "sharp",
-  "jszip",
   ...builtinModules,
   ...builtinModules.map((m) => `node:${m}`),
 ];
