@@ -20,6 +20,20 @@ export class RowValidator {
   }
 
   /**
+   * 获取指定行的数据
+   */
+  getRowData(rowNumber: number): Record<string, any> | undefined {
+    return this.allRowsData.get(rowNumber);
+  }
+
+  /**
+   * 获取所有行数据
+   */
+  getAllRowsData(): Map<number, Record<string, any>> {
+    return this.allRowsData;
+  }
+
+  /**
    * 验证单行数据
    */
   validateRow(

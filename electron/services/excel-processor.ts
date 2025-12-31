@@ -93,7 +93,7 @@ export class ExcelStreamProcessor {
       // 如果没指定工作表名，尝试匹配模板
       const matchesTemplate =
         !sheetName && this.xlsxParser.matchesTemplate(currentSheetName, template);
-      
+
       console.log(`🔍 [工作表匹配] "${currentSheetName}":`, {
         sheetNameProvided: !!sheetName,
         matchesTemplate,
@@ -113,7 +113,7 @@ export class ExcelStreamProcessor {
         availableSheets.push({ name: currentSheetName, hasData: sheetHasData });
         continue;
       }
-      
+
       console.log(`✅ [工作表选中] 开始处理: "${currentSheetName}"`);
 
       onProgress?.(20, `[2/6] 正在处理工作表: ${currentSheetName}`);
@@ -271,7 +271,6 @@ export class ExcelStreamProcessor {
       blurryImages: 0,
       duplicateImages: 0,
       suspiciousImages: 0,
-      watermarkedImages: 0,
       seasonMismatchImages: 0,
       borderImages: 0,
     };
@@ -283,7 +282,7 @@ export class ExcelStreamProcessor {
     const fileStats = fs.statSync(filePath);
     const fileSizeMB = fileStats.size / (1024 * 1024);
     const fileSizeGB = fileSizeMB / 1024;
-    
+
     console.log("🖼️ [图片验证开始]", {
       filePath,
       targetWorksheet,
@@ -303,7 +302,7 @@ export class ExcelStreamProcessor {
         targetWorksheet,
         onProgress
       );
-      
+
       const imageValidationDuration = Date.now() - imageValidationStartTime;
       console.log("✅ [图片验证完成]", {
         ...imageResults.stats,
@@ -311,7 +310,7 @@ export class ExcelStreamProcessor {
         durationMs: imageValidationDuration,
         isNotWpsFormat: imageResults.isNotWpsFormat,
       });
-      
+
       // 检查是否为非 WPS 格式
       if (imageResults.isNotWpsFormat) {
         imageValidationSkipped = true;
@@ -329,6 +328,182 @@ export class ExcelStreamProcessor {
         stack: error instanceof Error ? error.stack : undefined,
       });
       // 图片验证失败不阻止整体验证
+    }
+
+    // 区域重复检测（检测同一家药店/医院的多张图片中重复出现的可移动物体）
+    if (!imageValidationSkipped && imageStats.totalImages >= 5) {
+      try {
+        onProgress?.(88, "[5/6] 正在检测区域重复...");
+        console.log("🔳 [区域重复检测] 开始检测可移动物体重复 (按药店/医院分组)...");
+
+        // 重新提取图片用于区域检测
+        const wpsExtractor = new WpsImageExtractor();
+        const wpsImages = await wpsExtractor.extractImages(filePath, targetWorksheet);
+
+        if (wpsImages.length >= 5) {
+          // 获取验证器中的行数据，用于获取药店/医院名称
+          const allRowsData = validator.getAllRowsData();
+
+          // 根据任务类型确定分组字段
+          const groupField = template.name === "药店拜访" ? "retailChannel" : "hospitalName";
+
+          // 保存图片索引到 buffer 的映射，用于后续生成缩略图
+          const imageBufferMap = new Map<number, Buffer>();
+
+          const regionalResult = await this.imageValidationService.validateRegionalDuplicates(
+            wpsImages.map((img, idx) => {
+              // 从行数据中获取药店/医院名称作为分组键
+              const rowData = allRowsData.get(img.row);
+              const groupKey = rowData?.[groupField] || rowData?.["零售渠道"] || rowData?.["医疗机构名称"] || `row_${img.row}`;
+
+              // 保存 buffer 用于生成缩略图
+              imageBufferMap.set(idx, img.buffer);
+
+              return {
+                buffer: img.buffer,
+                range: null,
+                positionDesc: `行${img.row} 列${img.column}`,
+                row: img.row,
+                groupKey: String(groupKey).trim(),
+              };
+            }),
+            (progress, message) => {
+              // 进度映射到 88-94%
+              const mappedProgress = 88 + (progress / 100) * 6;
+              onProgress?.(mappedProgress, `[5/6] ${message}`);
+            },
+            true // 使用分组模式
+          );
+
+          // 将区域重复添加到错误列表，并生成缩略图
+          for (const dup of regionalResult.duplicates) {
+            // 为两张图片生成缩略图
+            let image1Data: string | undefined;
+            let image2Data: string | undefined;
+
+            try {
+              const buffer1 = imageBufferMap.get(dup.image1Index);
+              const buffer2 = imageBufferMap.get(dup.image2Index);
+
+              if (buffer1) {
+                const thumb1 = await this.imageValidationService.imageValidator.imageProcessor.createThumbnail(buffer1);
+                if (thumb1) image1Data = thumb1.data;
+              }
+              if (buffer2) {
+                const thumb2 = await this.imageValidationService.imageValidator.imageProcessor.createThumbnail(buffer2);
+                if (thumb2) image2Data = thumb2.data;
+              }
+            } catch (e) {
+              console.warn("区域重复缩略图生成失败:", e);
+            }
+
+            imageErrors.push({
+              row: 0, // 区域重复涉及多张图片，不指定单一行
+              column: "",
+              field: "图片",
+              imageIndex: dup.image1Index,
+              errorType: "regionDuplicate",
+              message: `区域重复: 图片 ${dup.image1Position || `#${dup.image1Index}`} 与 ${dup.image2Position || `#${dup.image2Index}`} 的 ${dup.regionName} 区域高度相似 (${(dup.similarity * 100).toFixed(0)}%)`,
+              imageData: image1Data,
+              mimeType: "image/jpeg",
+              details: {
+                regionDuplicate: dup,
+                duplicateOfImageData: image2Data,
+                duplicateOfPosition: dup.image2Position,
+                duplicateOf: dup.image2Index,
+              },
+            });
+          }
+
+          if (regionalResult.duplicates.length > 0) {
+            console.log(`⚠️ [区域重复检测] 发现 ${regionalResult.duplicates.length} 个可疑区域重复`);
+          } else {
+            console.log("✅ [区域重复检测] 未发现可疑区域重复");
+          }
+        }
+      } catch (error) {
+        console.error("❌ [区域重复检测失败]:", error);
+        // 区域重复检测失败不阻止整体验证
+      }
+    }
+
+    // 物体重复检测（检测人物、车辆、物品等可移动物体的重复）
+    if (!imageValidationSkipped && imageStats.totalImages >= 2) {
+      try {
+        onProgress?.(90, "[5.5/6] 正在检测物体重复...");
+        console.log("🎯 [物体重复检测] 开始检测可移动物体（人物/车辆/物品）重复...");
+
+        // 使用已提取的图片
+        const wpsExtractor = new WpsImageExtractor();
+        const wpsImages = await wpsExtractor.extractImages(filePath, targetWorksheet);
+
+        if (wpsImages.length >= 2) {
+          // 保存图片索引到 buffer 的映射
+          const imageBufferMap = new Map<number, Buffer>();
+          wpsImages.forEach((img, idx) => {
+            imageBufferMap.set(idx, img.buffer);
+          });
+
+          const objectResult = await this.imageValidationService.validateObjectDuplicates(
+            wpsImages.map((img, idx) => ({
+              buffer: img.buffer,
+              positionDesc: `行${img.row} 列${img.column}`,
+            })),
+            (progress, message) => {
+              const mappedProgress = 90 + (progress / 100) * 4;
+              onProgress?.(mappedProgress, `[5.5/6] ${message}`);
+            }
+          );
+
+          // 将物体重复添加到错误列表
+          for (const dup of objectResult.duplicates) {
+            let image1Data: string | undefined;
+            let image2Data: string | undefined;
+
+            try {
+              const buffer1 = imageBufferMap.get(dup.image1Index);
+              const buffer2 = imageBufferMap.get(dup.image2Index);
+
+              if (buffer1) {
+                const thumb1 = await this.imageValidationService.imageValidator.imageProcessor.createThumbnail(buffer1);
+                if (thumb1) image1Data = thumb1.data;
+              }
+              if (buffer2) {
+                const thumb2 = await this.imageValidationService.imageValidator.imageProcessor.createThumbnail(buffer2);
+                if (thumb2) image2Data = thumb2.data;
+              }
+            } catch (e) {
+              console.warn("物体重复缩略图生成失败:", e);
+            }
+
+            imageErrors.push({
+              row: 0,
+              column: "",
+              field: "图片",
+              imageIndex: dup.image1Index,
+              errorType: "objectDuplicate",
+              message: `物体重复: 在 ${dup.image1Position || `图${dup.image1Index + 1}`} 与 ${dup.image2Position || `图${dup.image2Index + 1}`} 中检测到相同的 ${dup.objectClassCN} (相似度: ${(dup.similarity * 100).toFixed(0)}%)`,
+              imageData: image1Data,
+              mimeType: "image/jpeg",
+              details: {
+                objectDuplicate: dup,
+                duplicateOfImageData: image2Data,
+                duplicateOfPosition: dup.image2Position,
+                duplicateOf: dup.image2Index,
+              },
+            });
+          }
+
+          if (objectResult.duplicates.length > 0) {
+            console.log(`⚠️ [物体重复检测] 发现 ${objectResult.duplicates.length} 个重复物体`);
+          } else {
+            console.log("✅ [物体重复检测] 未发现重复物体");
+          }
+        }
+      } catch (error) {
+        console.error("❌ [物体重复检测失败]:", error);
+        // 物体重复检测失败不阻止整体验证
+      }
     }
 
     onProgress?.(95, "[6/6] 正在生成验证报告...");
@@ -381,7 +556,6 @@ export class ExcelStreamProcessor {
       blurryImages: number;
       duplicateImages: number;
       suspiciousImages: number;
-      watermarkedImages: number;
       seasonMismatchImages: number;
       borderImages: number;
     };
@@ -393,7 +567,6 @@ export class ExcelStreamProcessor {
       blurryImages: 0,
       duplicateImages: 0,
       suspiciousImages: 0,
-      watermarkedImages: 0,
       seasonMismatchImages: 0,
       borderImages: 0,
     };
@@ -441,7 +614,6 @@ export class ExcelStreamProcessor {
             blurryImages: 0,
             duplicateImages: 0,
             suspiciousImages: 0,
-            watermarkedImages: 0,
             seasonMismatchImages: 0,
             borderImages: 0,
           },
@@ -470,7 +642,6 @@ export class ExcelStreamProcessor {
       stats.blurryImages = serviceStats.blurryImages;
       stats.duplicateImages = serviceStats.duplicateImages;
       stats.suspiciousImages = serviceStats.suspiciousImages;
-      stats.watermarkedImages = serviceStats.watermarkedImages;
       stats.seasonMismatchImages = serviceStats.seasonMismatchImages;
       stats.borderImages = serviceStats.borderImages;
 
@@ -497,7 +668,7 @@ export class ExcelStreamProcessor {
         if (result.isDuplicate) {
           const duplicateOfDesc =
             result.duplicateOfPosition || `图片 #${result.duplicateOf}`;
-          
+
           // 获取原图的缩略图数据（用于左右对比）
           let duplicateOfImageData: string | undefined;
           if (result.duplicateOf !== undefined) {
@@ -522,7 +693,7 @@ export class ExcelStreamProcessor {
               }
             }
           }
-          
+
           errors.push({
             row: imageInfo.row || 0,
             column: imageInfo.column || "",
@@ -557,23 +728,6 @@ export class ExcelStreamProcessor {
           });
         }
 
-        // 水印检测
-        if (result.hasWatermark) {
-          errors.push({
-            row: imageInfo.row || 0,
-            column: imageInfo.column || "",
-            field: "图片",
-            imageIndex: index,
-            errorType: "watermark",
-            message: `检测到水印 (置信度: ${result.watermarkConfidence.toFixed(0)}%)`,
-            details: {
-              watermarkConfidence: result.watermarkConfidence,
-            },
-            imageData: thumbnail?.data,
-            mimeType: thumbnail?.mimeType,
-          });
-        }
-
         // 季节不符检测
         if (!result.seasonMatchesCurrent && result.detectedSeason !== "unknown") {
           errors.push({
@@ -599,7 +753,7 @@ export class ExcelStreamProcessor {
             const width = result.borderWidth[side];
             return `${sideNames[side] || side}${width ? `(${width}px)` : ""}`;
           }).join("、");
-          
+
           errors.push({
             row: imageInfo.row || 0,
             column: imageInfo.column || "",

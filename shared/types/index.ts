@@ -1,5 +1,8 @@
 // 类型定义文件 - 共享给主进程和渲染进程
 
+// 导出检测相关类型
+export * from "./detection";
+
 export interface ValidationError {
   row: number;
   column?: string;
@@ -14,7 +17,7 @@ export interface ImageValidationError {
   column?: string;
   field?: string;
   imageIndex: number;
-  errorType: "blur" | "duplicate" | "suspicious" | "watermark" | "seasonMismatch" | "border";
+  errorType: "blur" | "duplicate" | "suspicious" | "seasonMismatch" | "border" | "regionDuplicate" | "objectDuplicate";
   message: string;
   details?: {
     blurScore?: number;
@@ -25,8 +28,6 @@ export interface ImageValidationError {
     duplicateOfImageData?: string;
     suspicionScore?: number;
     suspicionLevel?: string;
-    /** 水印检测置信度 */
-    watermarkConfidence?: number;
     /** 检测到的季节 */
     detectedSeason?: string;
     /** 季节不符原因 */
@@ -35,6 +36,28 @@ export interface ImageValidationError {
     borderSides?: string[];
     /** 边框宽度 */
     borderWidth?: Record<string, number>;
+    /** 区域重复检测结果 */
+    regionDuplicate?: {
+      regionIndex: number;
+      regionName: string;
+      image1Index: number;
+      image2Index: number;
+      image1Position?: string;
+      image2Position?: string;
+      similarity: number;
+    };
+    /** 物体重复检测结果 */
+    objectDuplicate?: {
+      objectClass: string;
+      objectClassCN: string;
+      image1Index: number;
+      image2Index: number;
+      image1Position?: string;
+      image2Position?: string;
+      similarity: number;
+      bbox1?: { x: number; y: number; width: number; height: number };
+      bbox2?: { x: number; y: number; width: number; height: number };
+    };
   };
   /** Base64 编码的缩略图数据（用于预览） */
   imageData?: string;
@@ -51,7 +74,6 @@ export interface ValidationSummary {
     blurryImages: number;
     duplicateImages: number;
     suspiciousImages: number;
-    watermarkedImages: number;
     seasonMismatchImages: number;
     borderImages: number;
   };
@@ -95,19 +117,19 @@ export interface ExportResult {
 export interface ValidationRule {
   field: string;
   type:
-    | "required"
-    | "unique"
-    | "timeRange"
-    | "duration"
-    | "frequency"
-    | "dateInterval"
-    | "dateFormat"
-    | "minValue"
-    | "medicalLevel"
-    | "sixMonthsInterval"
-    | "crossTaskValidation"
-    | "prohibitedContent"
-    | "sameImplementer";
+  | "required"
+  | "unique"
+  | "timeRange"
+  | "duration"
+  | "frequency"
+  | "dateInterval"
+  | "dateFormat"
+  | "minValue"
+  | "medicalLevel"
+  | "sixMonthsInterval"
+  | "crossTaskValidation"
+  | "prohibitedContent"
+  | "sameImplementer";
   params?: any;
   message: string;
 }

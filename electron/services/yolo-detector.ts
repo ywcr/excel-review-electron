@@ -2,10 +2,16 @@
  * YOLO 物体检测器
  * 使用 YOLOv8s ONNX 模型检测图片中的物体
  */
-import * as ort from "onnxruntime-node";
-import * as path from "path";
+// Use dynamic require to bypass Rollup bundling for native module
+import type * as OnnxRuntime from "onnxruntime-node";
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const ort: typeof OnnxRuntime = require("onnxruntime-node");
 import sharp from "sharp";
-import { app } from "electron";
+import { getModelPath } from "../config/paths";
+import { yoloLogger } from "../utils/logger";
+
+// 从共享类型导出，保持向后兼容
+export type { DetectedObject } from "../../shared/types/detection";
 
 // COCO 数据集的 80 个类别
 const COCO_CLASSES = [
@@ -51,51 +57,37 @@ const CLASS_NAMES_CN: Record<string, string> = {
   "clock": "时钟",
 };
 
-export interface DetectedObject {
-  class: string;
-  classNameCN: string;
-  confidence: number;
-  bbox: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
-}
+// 导入共享类型用于内部使用
+import type { DetectedObject } from "../../shared/types/detection";
 
 export class YoloDetector {
-  private session: ort.InferenceSession | null = null;
+  private session: OnnxRuntime.InferenceSession | null = null;
   private readonly modelPath: string;
   private readonly inputSize = 640;
   private readonly confidenceThreshold = 0.5;
   private readonly iouThreshold = 0.45;
 
   constructor() {
-    // 根据环境选择模型路径
-    const isDev = !app.isPackaged;
-    if (isDev) {
-      this.modelPath = path.join(process.cwd(), "electron", "models", "yolov8s.onnx");
-    } else {
-      this.modelPath = path.join(process.resourcesPath, "models", "yolov8s.onnx");
-    }
+    // 使用统一的路径解析模块
+    this.modelPath = getModelPath("yolov8s.onnx");
   }
 
   async initialize(): Promise<boolean> {
     try {
-      console.log("[YOLO] 正在加载模型:", this.modelPath);
-      
+      yoloLogger.info("正在加载模型:", this.modelPath);
+
       this.session = await ort.InferenceSession.create(this.modelPath, {
         executionProviders: ["cpu"],
         graphOptimizationLevel: "all",
       });
 
-      console.log("[YOLO] 模型加载成功");
-      console.log("[YOLO] 输入:", this.session.inputNames);
-      console.log("[YOLO] 输出:", this.session.outputNames);
-      
+      yoloLogger.success("模型加载成功");
+      yoloLogger.debug("输入:", this.session.inputNames);
+      yoloLogger.debug("输出:", this.session.outputNames);
+
       return true;
     } catch (error) {
-      console.error("[YOLO] 模型加载失败:", error);
+      yoloLogger.error("模型加载失败:", error);
       return false;
     }
   }
@@ -127,7 +119,7 @@ export class YoloDetector {
 
       return detections;
     } catch (error) {
-      console.error("[YOLO] 检测失败:", error);
+      yoloLogger.error("检测失败:", error);
       return [];
     }
   }
@@ -136,7 +128,7 @@ export class YoloDetector {
    * 预处理图片
    */
   private async preprocessImage(imageBuffer: Buffer): Promise<{
-    tensor: ort.Tensor;
+    tensor: OnnxRuntime.Tensor;
     originalWidth: number;
     originalHeight: number;
   }> {
@@ -185,7 +177,7 @@ export class YoloDetector {
       // 获取类别分数
       let maxScore = 0;
       let maxClassId = 0;
-      
+
       for (let c = 0; c < numClasses; c++) {
         const score = output[(4 + c) * numDetections + i];
         if (score > maxScore) {
@@ -207,7 +199,7 @@ export class YoloDetector {
       const scaleY = originalHeight / this.inputSize;
 
       const className = COCO_CLASSES[maxClassId];
-      
+
       detections.push({
         class: className,
         classNameCN: CLASS_NAMES_CN[className] || className,
@@ -284,7 +276,7 @@ export class YoloDetector {
     const classes2 = new Set(detections2.map(d => d.class));
 
     const commonObjects = [...classes1].filter(c => classes2.has(c));
-    
+
     // 计算相似度分数
     const totalClasses = new Set([...classes1, ...classes2]).size;
     const score = totalClasses > 0 ? commonObjects.length / totalClasses : 0;
@@ -293,6 +285,91 @@ export class YoloDetector {
       commonObjects,
       score,
     };
+  }
+
+  /**
+   * 获取可移动物体（用于重复检测）
+   * 筛选出可能重复出现的物体类别
+   */
+  getMovableObjects(detections: DetectedObject[]): DetectedObject[] {
+    // 可移动物体类别
+    const MOVABLE_CLASSES = new Set([
+      // 人物
+      "person",
+      // 车辆
+      "bicycle", "car", "motorcycle", "bus", "truck",
+      // 常见摆放物品
+      "bottle", "cup", "chair", "potted plant",
+      "backpack", "handbag", "suitcase", "umbrella",
+      // 动物
+      "cat", "dog", "bird",
+    ]);
+
+    return detections.filter(d => MOVABLE_CLASSES.has(d.class));
+  }
+
+  /**
+   * 裁剪检测到的物体区域
+   * @param imageBuffer 原始图片
+   * @param detection 检测到的物体
+   * @param padding 边界扩展比例（默认 10%）
+   */
+  async cropObject(
+    imageBuffer: Buffer,
+    detection: DetectedObject,
+    padding: number = 0.1
+  ): Promise<Buffer> {
+    const metadata = await sharp(imageBuffer).metadata();
+    if (!metadata.width || !metadata.height) {
+      throw new Error("无法获取图片尺寸");
+    }
+
+    const { bbox } = detection;
+
+    // 计算带 padding 的裁剪区域
+    const padX = bbox.width * padding;
+    const padY = bbox.height * padding;
+
+    const left = Math.max(0, Math.round(bbox.x - padX));
+    const top = Math.max(0, Math.round(bbox.y - padY));
+    const right = Math.min(metadata.width, Math.round(bbox.x + bbox.width + padX));
+    const bottom = Math.min(metadata.height, Math.round(bbox.y + bbox.height + padY));
+
+    const width = right - left;
+    const height = bottom - top;
+
+    if (width <= 0 || height <= 0) {
+      throw new Error("裁剪区域无效");
+    }
+
+    return sharp(imageBuffer)
+      .extract({ left, top, width, height })
+      .toBuffer();
+  }
+
+  /**
+   * 检测并裁剪所有可移动物体
+   * @param imageBuffer 原始图片
+   * @returns 物体及其裁剪后的图片
+   */
+  async detectAndCropMovableObjects(
+    imageBuffer: Buffer
+  ): Promise<Array<{ object: DetectedObject; croppedBuffer: Buffer }>> {
+    const detections = await this.detect(imageBuffer);
+    const movableObjects = this.getMovableObjects(detections);
+
+    const results: Array<{ object: DetectedObject; croppedBuffer: Buffer }> = [];
+
+    for (const obj of movableObjects) {
+      try {
+        const croppedBuffer = await this.cropObject(imageBuffer, obj);
+        results.push({ object: obj, croppedBuffer });
+      } catch (error) {
+        yoloLogger.warn(`裁剪物体失败 (${obj.class}):`, error);
+      }
+    }
+
+    return results;
   }
 }
 

@@ -2,38 +2,16 @@
  * 季节一致性验证器
  * 判断图片内容是否符合当前季节（中国北方）
  */
-import { Season, ClipDetectionResult } from "../services/clip-detector";
+import {
+  Season,
+  ClipDetectionResult,
+  SEASON_MONTHS,
+  SEASON_NAMES,
+  SeasonValidationResult,
+} from "../../shared/types/detection";
 
-// 中国北方季节月份映射
-const SEASON_MONTHS: Record<Season, number[]> = {
-  spring: [3, 4, 5],
-  summer: [6, 7, 8],
-  autumn: [9, 10, 11],
-  winter: [12, 1, 2],
-  unknown: [],
-};
-
-// 季节中文名称
-const SEASON_NAMES: Record<Season, string> = {
-  spring: "春季",
-  summer: "夏季",
-  autumn: "秋季",
-  winter: "冬季",
-  unknown: "未知",
-};
-
-export interface SeasonValidationResult {
-  /** 是否符合当前季节 */
-  matchesCurrent: boolean;
-  /** 当前季节 */
-  currentSeason: Season;
-  /** 检测到的季节 */
-  detectedSeason: Season;
-  /** 不符原因（如果不符） */
-  mismatchReason?: string;
-  /** 置信度 */
-  confidence: number;
-}
+// 导出类型供外部使用
+export type { SeasonValidationResult } from "../../shared/types/detection";
 
 export class SeasonValidator {
   /**
@@ -59,10 +37,21 @@ export class SeasonValidator {
     referenceDate?: Date
   ): SeasonValidationResult {
     const currentSeason = this.getCurrentSeason(referenceDate);
-    const { detectedSeason, seasonConfidence, clothingSeason, scenerySeason } =
+    const { detectedSeason, seasonConfidence, clothingSeason, scenerySeason, hasPerson, hasPlant } =
       detectionResult;
 
-    // 如果没有检测到季节信息（如室内/无人图片），认为符合
+    // 如果没有人物也没有植物，无法判断季节，认为符合
+    if (!hasPerson && !hasPlant) {
+      return {
+        matchesCurrent: true,
+        currentSeason,
+        detectedSeason: "unknown",
+        mismatchReason: "图片中无人物或植物，跳过季节检测",
+        confidence: 0,
+      };
+    }
+
+    // 如果没有检测到季节信息，认为符合
     if (detectedSeason === "unknown") {
       return {
         matchesCurrent: true,
@@ -117,8 +106,8 @@ export class SeasonValidator {
     }
 
     // 极端比例的图片跳过（可能是 banner、按钮）
-    const aspect = Math.max(metadata.width, metadata.height) / 
-                   Math.min(metadata.width, metadata.height);
+    const aspect = Math.max(metadata.width, metadata.height) /
+      Math.min(metadata.width, metadata.height);
     if (aspect > 4) {
       return false;
     }

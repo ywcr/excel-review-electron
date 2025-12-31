@@ -1,6 +1,8 @@
 /**
- * CLIP 图片智能检测服务
- * 使用 OpenAI CLIP 模型进行水印检测和季节识别
+ * CLIP 图片智能检测服务（精简版）
+ * 使用 OpenAI CLIP 模型进行季节识别
+ *
+ * 已移除功能：水印检测、模糊检测、场景分类
  */
 // Use dynamic require to bypass Rollup bundling for native module
 import type * as OnnxRuntime from "onnxruntime-node";
@@ -9,57 +11,38 @@ const ort: typeof OnnxRuntime = require("onnxruntime-node");
 import * as path from "path";
 import * as fs from "fs";
 import sharp from "sharp";
+import { getModelsDirectory, isDevelopment } from "../config/paths";
+import { clipLogger } from "../utils/logger";
 
-// 季节定义（中国北方）
-export type Season = "spring" | "summer" | "autumn" | "winter" | "unknown";
+// 从共享类型导出，保持向后兼容
+export type { Season, ClipDetectionResult } from "../../shared/types/detection";
+import type { Season, ClipDetectionResult } from "../../shared/types/detection";
 
-export interface ClipDetectionResult {
-  // 水印检测
-  hasWatermark: boolean;
-  watermarkConfidence: number;
+// ==================== 季节检测 Prompts ====================
+// 只保留季节检测相关的 prompts，移除水印/模糊/场景分类
 
-  // 季节检测
-  detectedSeason: Season;
-  seasonConfidence: number;
-  clothingSeason?: Season;
-  scenerySeason?: Season;
-
-  // 模糊检测
-  isBlurry: boolean;
-  blurConfidence: number;
-
-  // 原始分数（调试用）
-  rawScores?: Record<string, number>;
-}
-
-// 检测 prompts - 增强透明水印检测
-const WATERMARK_PROMPTS = [
-  "a photo with visible watermark or logo overlay",
-  "a photo with semi-transparent text or logo watermark",
-  "a photo with faint watermark in the corner",
-  "a clean photo without any watermark",
-];
-
+// 穿着季节检测 prompts
 const CLOTHING_PROMPTS = [
-  "person wearing heavy winter down jacket with fur hood or collar, thick puffer coat, scarf, gloves, or beanie",
-  "person wearing autumn clothes like trench coat, wool coat, blazer, sweater, or long sleeves",
-  "person wearing summer clothes like t-shirt, shorts, tank top, skirt, sundress, or sandals",
-  "person wearing light spring clothes like thin jacket, hoodie, light cardigan, or casual wear",
-  "no person visible in the image",
+  // 冬季：厚重衣物
+  "person wearing puffy down jacket, thick winter coat, or heavy padded clothing",
+  // 秋季：中等厚度衣物
+  "person wearing sweater, cardigan, light jacket, or windbreaker",
+  // 夏季：轻薄衣物
+  "person wearing t-shirt, tank top, shorts, summer dress, or sleeveless clothing",
+  // 春季：薄外套
+  "person wearing thin jacket, light coat, or casual spring clothes",
 ];
 
+// 植物/场景季节检测 prompts
 const SCENERY_PROMPTS = [
-  "cold winter scene with bare trees without leaves, dry brown branches against clear sky",
-  "autumn scene with colorful yellow orange red falling leaves on trees",
-  "hot summer scene with dense green trees, lush foliage everywhere",
-  "spring scene with pink cherry blossoms, flowers blooming, fresh green grass",
-  "indoor scene or no natural scenery visible",
-];
-
-// 模糊检测 prompts
-const BLUR_PROMPTS = [
-  "a blurry, out of focus, or motion blurred photo",
-  "a sharp, clear, and in-focus photo",
+  // 冬季：枯树、无叶
+  "winter scene with bare trees, no leaves, dry brown branches, snow or frost",
+  // 秋季：红叶、黄叶、落叶
+  "autumn scene with colorful yellow orange red leaves, falling leaves on trees",
+  // 夏季：茂盛绿树
+  "summer scene with dense green trees, lush green foliage, full canopy",
+  // 春季：花朵、新芽
+  "spring scene with cherry blossoms, flowers blooming, fresh green buds",
 ];
 
 export class ClipDetector {
@@ -70,22 +53,9 @@ export class ClipDetector {
   private modelDir: string;
 
   constructor() {
-    // 模型目录：开发环境在 electron/models，打包后在 resources/models
-    // 注意：开发模式下 process.resourcesPath 也存在，但指向 Electron 包目录
-    // 因此需要使用 app.isPackaged 或检查 ELECTRON_DEV 环境变量
-    const isDev = process.env.NODE_ENV === "development" || 
-                  !process.resourcesPath?.includes("app.asar") ||
-                  process.resourcesPath?.includes("node_modules");
-    
-    if (isDev) {
-      // 开发模式：使用项目根目录下的 electron/models
-      // __dirname 在编译后可能是 dist-electron，需要回到项目根目录
-      this.modelDir = path.join(process.cwd(), "electron", "models");
-    } else {
-      // 打包后：使用 resources/models
-      this.modelDir = path.join(process.resourcesPath!, "models");
-    }
-    console.log(`📂 [CLIP] 模型目录: ${this.modelDir} (开发模式: ${isDev})`);
+    // 使用统一的路径解析模块
+    this.modelDir = getModelsDirectory();
+    clipLogger.info(`模型目录: ${this.modelDir} (开发模式: ${isDevelopment()})`);
   }
 
   /**
@@ -104,44 +74,42 @@ export class ClipDetector {
 
     // 检查模型文件是否存在
     if (!fs.existsSync(visualModelPath)) {
-      console.warn(
-        `⚠️ CLIP visual model not found at ${visualModelPath}. Detection disabled.`
-      );
+      clipLogger.warn(`CLIP visual model not found at ${visualModelPath}. Detection disabled.`);
       return false;
     }
 
     try {
-      console.log("🔄 Loading CLIP visual model...");
+      clipLogger.info("Loading CLIP visual model...");
       this.visualSession = await ort.InferenceSession.create(visualModelPath, {
         executionProviders: ["cpu"],
       });
 
       // 加载预计算的文本嵌入（如果存在）
       if (fs.existsSync(embeddingsPath)) {
-        console.log("🔄 Loading pre-computed text embeddings...");
+        clipLogger.info("Loading pre-computed text embeddings...");
         const embeddings = JSON.parse(fs.readFileSync(embeddingsPath, "utf-8"));
         for (const [text, values] of Object.entries(embeddings)) {
           this.textEmbeddings.set(text, new Float32Array(values as number[]));
         }
-        console.log(`📚 Loaded ${this.textEmbeddings.size} text embeddings`);
+        clipLogger.info(`Loaded ${this.textEmbeddings.size} text embeddings`);
       } else if (fs.existsSync(textModelPath)) {
         // 如果有文本模型，动态计算嵌入
-        console.log("🔄 Loading CLIP text model...");
+        clipLogger.info("Loading CLIP text model...");
         this.textSession = await ort.InferenceSession.create(textModelPath, {
           executionProviders: ["cpu"],
         });
         // 预计算所有需要的文本嵌入
         await this.precomputeTextEmbeddings();
       } else {
-        console.warn("⚠️ No text embeddings or text model found.");
+        clipLogger.warn("No text embeddings or text model found.");
         return false;
       }
 
       this.isInitialized = true;
-      console.log("✅ CLIP detector initialized successfully");
+      clipLogger.success("CLIP detector initialized successfully");
       return true;
     } catch (error) {
-      console.error("❌ Failed to initialize CLIP detector:", error);
+      clipLogger.error("Failed to initialize CLIP detector:", error);
       return false;
     }
   }
@@ -153,7 +121,6 @@ export class ClipDetector {
     if (!this.textSession) return;
 
     const allPrompts = [
-      ...WATERMARK_PROMPTS,
       ...CLOTHING_PROMPTS,
       ...SCENERY_PROMPTS,
     ];
@@ -161,7 +128,7 @@ export class ClipDetector {
     for (const prompt of allPrompts) {
       // 简化的文本编码（实际需要 CLIP 的 tokenizer）
       // 这里假设已经有预计算的嵌入
-      console.log(`  Computing embedding for: ${prompt.substring(0, 30)}...`);
+      clipLogger.debug(`Computing embedding for: ${prompt.substring(0, 30)}...`);
     }
   }
 
@@ -211,9 +178,14 @@ export class ClipDetector {
   }
 
   /**
-   * 检测图片
+   * 季节检测（精简版，只检测季节）
+   * @param imageBuffer 图片 Buffer
+   * @param yoloContext YOLO 检测上下文（可选，用于判断是否有人/植物）
    */
-  async detect(imageBuffer: Buffer): Promise<ClipDetectionResult | null> {
+  async detect(
+    imageBuffer: Buffer,
+    yoloContext?: { hasPerson: boolean; hasPlant: boolean }
+  ): Promise<ClipDetectionResult | null> {
     if (!this.isInitialized) {
       const success = await this.initialize();
       if (!success) return null;
@@ -230,102 +202,111 @@ export class ClipDetector {
       const outputs = await this.visualSession.run({ input: inputTensor });
       const imageEmbedding = outputs.output.data as Float32Array;
 
-      // 3. 计算与各个文本的相似度
+      // 3. 计算与季节相关文本的相似度
       const scores: Record<string, number> = {};
-
       for (const [text, textEmbedding] of this.textEmbeddings) {
         scores[text] = this.cosineSimilarity(imageEmbedding, textEmbedding);
       }
 
-      // 4. 解析结果
-      const result = this.parseScores(scores);
-      
-      // 调试日志：输出检测结果
-      console.log(`🔍 [CLIP] 水印检测: ${result.hasWatermark ? '有水印' : '无水印'} (置信度: ${result.watermarkConfidence.toFixed(1)}%)`);
-      console.log(`🔍 [CLIP] 模糊检测: ${result.isBlurry ? '模糊' : '清晰'} (置信度: ${result.blurConfidence.toFixed(1)}%)`);
-      console.log(`🔍 [CLIP] 季节检测: ${result.detectedSeason} (置信度: ${result.seasonConfidence.toFixed(1)}%)`);
-      if (result.clothingSeason) console.log(`   - 穿着季节: ${result.clothingSeason}`);
-      if (result.scenerySeason) console.log(`   - 场景季节: ${result.scenerySeason}`);
-      
+      // 4. 解析季节检测结果
+      const result = this.parseSeasonScores(scores, yoloContext);
+
+      // 调试日志
+      clipLogger.info(`季节检测: ${result.detectedSeason} (置信度: ${result.seasonConfidence.toFixed(1)}%)`);
+      if (result.clothingSeason) clipLogger.debug(`  - 穿着季节: ${result.clothingSeason}`);
+      if (result.scenerySeason) clipLogger.debug(`  - 场景季节: ${result.scenerySeason}`);
+
       return result;
     } catch (error) {
-      console.error("CLIP detection failed:", error);
+      clipLogger.error("CLIP detection failed:", error);
       return null;
     }
   }
 
   /**
-   * 解析分数，返回检测结果
+   * 解析季节分数（精简版）
+   * @param scores CLIP 相似度分数
+   * @param yoloContext YOLO 检测上下文（可选）
    */
-  private parseScores(scores: Record<string, number>): ClipDetectionResult {
-    // 水印检测：比较有水印 vs 无水印的分数
-    const watermarkScore = scores[WATERMARK_PROMPTS[0]] || 0;
-    const cleanScore = scores[WATERMARK_PROMPTS[1]] || 0;
-    const watermarkConfidence = Math.abs(watermarkScore - cleanScore) * 100;
-    
-    // 水印检测需要满足两个条件：
-    // 1. "有水印"分数 > "无水印"分数
-    // 2. 置信度（分数差）需要 >= 10%，表示模型足够确定
-    const WATERMARK_CONFIDENCE_THRESHOLD = 10;
-    const hasWatermark = watermarkScore > cleanScore && watermarkConfidence >= WATERMARK_CONFIDENCE_THRESHOLD;
+  private parseSeasonScores(
+    scores: Record<string, number>,
+    yoloContext?: { hasPerson: boolean; hasPlant: boolean }
+  ): ClipDetectionResult {
+    const hasPerson = yoloContext?.hasPerson ?? false;
+    const hasPlant = yoloContext?.hasPlant ?? false;
 
-    // 穿着季节检测
-    const clothingScores = [
-      { season: "winter" as Season, score: scores[CLOTHING_PROMPTS[0]] || 0 },
-      { season: "autumn" as Season, score: scores[CLOTHING_PROMPTS[1]] || 0 },
-      { season: "summer" as Season, score: scores[CLOTHING_PROMPTS[2]] || 0 },
-      { season: "spring" as Season, score: scores[CLOTHING_PROMPTS[3]] || 0 },
-    ];
-    const noPersonScore = scores[CLOTHING_PROMPTS[4]] || 0;
-    const maxClothingScore = Math.max(...clothingScores.map((c) => c.score));
-    const clothingSeason =
-      noPersonScore > maxClothingScore
-        ? undefined
-        : clothingScores.find((c) => c.score === maxClothingScore)?.season;
+    clipLogger.debug(`[上下文] 有人: ${hasPerson}, 有植物: ${hasPlant}`);
 
-    // 场景季节检测
-    const sceneryScores = [
-      { season: "winter" as Season, score: scores[SCENERY_PROMPTS[0]] || 0 },
-      { season: "autumn" as Season, score: scores[SCENERY_PROMPTS[1]] || 0 },
-      { season: "summer" as Season, score: scores[SCENERY_PROMPTS[2]] || 0 },
-      { season: "spring" as Season, score: scores[SCENERY_PROMPTS[3]] || 0 },
-    ];
-    const indoorScore = scores[SCENERY_PROMPTS[4]] || 0;
-    const maxSceneryScore = Math.max(...sceneryScores.map((s) => s.score));
-    const scenerySeason =
-      indoorScore > maxSceneryScore
-        ? undefined
-        : sceneryScores.find((s) => s.score === maxSceneryScore)?.season;
+    // ========== 1. 穿着季节检测（仅当有人时） ==========
+    let clothingSeason: Season | undefined;
+    let maxClothingScore = 0;
+    const CLOTHING_CONFIDENCE_MARGIN = 0.03; // 3%
 
-    // 综合季节判断：优先场景，然后穿着
+    if (hasPerson) {
+      const clothingScores = [
+        { season: "winter" as Season, score: scores[CLOTHING_PROMPTS[0]] || 0 },
+        { season: "autumn" as Season, score: scores[CLOTHING_PROMPTS[1]] || 0 },
+        { season: "summer" as Season, score: scores[CLOTHING_PROMPTS[2]] || 0 },
+        { season: "spring" as Season, score: scores[CLOTHING_PROMPTS[3]] || 0 },
+      ];
+
+      const sortedScores = [...clothingScores].sort((a, b) => b.score - a.score);
+      maxClothingScore = sortedScores[0].score;
+      const margin = maxClothingScore - sortedScores[1].score;
+
+      if (margin >= CLOTHING_CONFIDENCE_MARGIN) {
+        clothingSeason = sortedScores[0].season;
+        clipLogger.debug(`穿着季节: ${clothingSeason} (分数: ${(maxClothingScore * 100).toFixed(1)}%, 差距: ${(margin * 100).toFixed(1)}%)`);
+      } else {
+        clipLogger.debug(`穿着季节不确定 (差距: ${(margin * 100).toFixed(1)}% < 3%)`);
+      }
+    }
+
+    // ========== 2. 植物/场景季节检测（仅当有植物时） ==========
+    let scenerySeason: Season | undefined;
+    let maxSceneryScore = 0;
+    const SCENERY_CONFIDENCE_MARGIN = 0.03; // 3%
+
+    if (hasPlant) {
+      const sceneryScores = [
+        { season: "winter" as Season, score: scores[SCENERY_PROMPTS[0]] || 0 },
+        { season: "autumn" as Season, score: scores[SCENERY_PROMPTS[1]] || 0 },
+        { season: "summer" as Season, score: scores[SCENERY_PROMPTS[2]] || 0 },
+        { season: "spring" as Season, score: scores[SCENERY_PROMPTS[3]] || 0 },
+      ];
+
+      const sortedScores = [...sceneryScores].sort((a, b) => b.score - a.score);
+      maxSceneryScore = sortedScores[0].score;
+      const margin = maxSceneryScore - sortedScores[1].score;
+
+      if (margin >= SCENERY_CONFIDENCE_MARGIN) {
+        scenerySeason = sortedScores[0].season;
+        clipLogger.debug(`场景季节: ${scenerySeason} (分数: ${(maxSceneryScore * 100).toFixed(1)}%, 差距: ${(margin * 100).toFixed(1)}%)`);
+      } else {
+        clipLogger.debug(`场景季节不确定 (差距: ${(margin * 100).toFixed(1)}% < 3%)`);
+      }
+    }
+
+    // ========== 3. 综合季节判断 ==========
+    // 优先使用穿着季节（更可靠），其次使用场景季节
     let detectedSeason: Season = "unknown";
     let seasonConfidence = 0;
 
-    if (scenerySeason) {
-      detectedSeason = scenerySeason;
-      seasonConfidence = maxSceneryScore * 100;
-    } else if (clothingSeason) {
+    if (clothingSeason) {
       detectedSeason = clothingSeason;
       seasonConfidence = maxClothingScore * 100;
+    } else if (scenerySeason) {
+      detectedSeason = scenerySeason;
+      seasonConfidence = maxSceneryScore * 100;
     }
 
-    // 模糊检测：比较模糊 vs 清晰的分数
-    const blurryScore = scores[BLUR_PROMPTS[0]] || 0;
-    const sharpScore = scores[BLUR_PROMPTS[1]] || 0;
-    const blurConfidence = Math.abs(blurryScore - sharpScore) * 100;
-    // 模糊检测阈值：置信度需要 >= 8% 才判定
-    const BLUR_CONFIDENCE_THRESHOLD = 8;
-    const isBlurry = blurryScore > sharpScore && blurConfidence >= BLUR_CONFIDENCE_THRESHOLD;
-
     return {
-      hasWatermark,
-      watermarkConfidence: Math.min(100, watermarkConfidence),
       detectedSeason,
       seasonConfidence: Math.min(100, seasonConfidence),
       clothingSeason,
       scenerySeason,
-      isBlurry,
-      blurConfidence: Math.min(100, blurConfidence),
+      hasPerson,
+      hasPlant,
       rawScores: scores,
     };
   }
@@ -384,10 +365,10 @@ export class ClipDetector {
         }
       }
 
-      console.log(`🔳 [CLIP] 区域嵌入: 生成 ${gridSize}x${gridSize}=${embeddings.length} 个区域嵌入`);
+      clipLogger.debug(`区域嵌入: 生成 ${gridSize}x${gridSize}=${embeddings.length} 个区域嵌入`);
       return embeddings;
     } catch (error) {
-      console.error("获取区域嵌入失败:", error);
+      clipLogger.error("获取区域嵌入失败:", error);
       return null;
     }
   }
@@ -411,7 +392,7 @@ export class ClipDetector {
       const outputs = await this.visualSession.run({ input: inputTensor });
       return outputs.output.data as Float32Array;
     } catch (error) {
-      console.error("获取图片嵌入失败:", error);
+      clipLogger.error("获取图片嵌入失败:", error);
       return null;
     }
   }

@@ -16,7 +16,9 @@ const REGION_NAMES = [
 export interface RegionalEmbedding {
   imageIndex: number;
   position?: string;  // 如 "行5 列M"
+  row?: number;       // 行号
   date?: string;      // 拍摄日期
+  groupKey?: string;  // 分组键（如药店名称）
   embeddings: Float32Array[];  // 9 个区域的嵌入向量
 }
 
@@ -48,6 +50,8 @@ export class RegionalDuplicateDetector {
     imageBuffer: Buffer,
     imageIndex: number,
     position?: string,
+    row?: number,
+    groupKey?: string,
     date?: string
   ): Promise<boolean> {
     const clipDetector = getClipDetector();
@@ -64,11 +68,13 @@ export class RegionalDuplicateDetector {
     this.images.push({
       imageIndex,
       position,
+      row,
+      groupKey,
       date,
       embeddings,
     });
 
-    console.log(`📥 [区域检测] 添加图片 #${imageIndex}, 总数: ${this.images.length}`);
+    console.log(`📥 [区域检测] 添加图片 #${imageIndex}${groupKey ? ` (${groupKey})` : ''}, 总数: ${this.images.length}`);
     return true;
   }
 
@@ -175,6 +181,118 @@ export class RegionalDuplicateDetector {
       hasDuplicate,
       staticRegions,
       duplicates,
+      totalImages,
+    };
+  }
+
+  /**
+   * 按分组检测区域重复
+   * 只在同一 groupKey 的图片之间进行比较
+   */
+  detectDuplicatesGrouped(): RegionalDuplicateResult {
+    const totalImages = this.images.length;
+
+    if (totalImages < 2) {
+      return {
+        hasDuplicate: false,
+        staticRegions: [],
+        duplicates: [],
+        totalImages,
+      };
+    }
+
+    // 按 groupKey 分组
+    const groups = new Map<string, RegionalEmbedding[]>();
+    for (const img of this.images) {
+      const key = img.groupKey || "__default__";
+      if (!groups.has(key)) {
+        groups.set(key, []);
+      }
+      groups.get(key)!.push(img);
+    }
+
+    console.log(`🏪 [区域检测] 分组检测: ${groups.size} 个分组`);
+
+    const clipDetector = getClipDetector();
+    const numRegions = this.config.GRID_SIZE * this.config.GRID_SIZE;
+    const allDuplicates: RegionalDuplicateMatch[] = [];
+    const allStaticRegions: number[] = [];
+
+    // 对每个分组单独检测
+    for (const [groupKey, groupImages] of groups) {
+      if (groupImages.length < 2) continue;
+
+      console.log(`📂 [区域检测] 检测分组 "${groupKey}": ${groupImages.length} 张图片`);
+
+      // 1. 计算分组内每个区域的相似度
+      const regionSimilarities: number[][] = Array(numRegions).fill(null).map(() => []);
+
+      for (let i = 0; i < groupImages.length; i++) {
+        for (let j = i + 1; j < groupImages.length; j++) {
+          for (let r = 0; r < numRegions; r++) {
+            const sim = clipDetector.calculateSimilarity(
+              groupImages[i].embeddings[r],
+              groupImages[j].embeddings[r]
+            );
+            regionSimilarities[r].push(sim);
+          }
+        }
+      }
+
+      // 2. 识别静态区域（门头照的招牌区域等）
+      const staticRegions: number[] = [];
+      for (let r = 0; r < numRegions; r++) {
+        const sims = regionSimilarities[r];
+        if (sims.length === 0) continue;
+
+        const highSimCount = sims.filter((s) => s >= this.config.STATIC_THRESHOLD).length;
+        const highSimRatio = highSimCount / sims.length;
+
+        if (highSimRatio >= this.config.MIN_STATIC_RATIO) {
+          staticRegions.push(r);
+        }
+      }
+
+      // 3. 在非静态区域检测可疑重复
+      for (let i = 0; i < groupImages.length; i++) {
+        for (let j = i + 1; j < groupImages.length; j++) {
+          for (let r = 0; r < numRegions; r++) {
+            if (staticRegions.includes(r)) continue;
+
+            const sim = clipDetector.calculateSimilarity(
+              groupImages[i].embeddings[r],
+              groupImages[j].embeddings[r]
+            );
+
+            if (sim >= this.config.DUPLICATE_THRESHOLD) {
+              allDuplicates.push({
+                regionIndex: r,
+                regionName: REGION_NAMES[r] || `区域${r}`,
+                image1Index: groupImages[i].imageIndex,
+                image2Index: groupImages[j].imageIndex,
+                image1Position: groupImages[i].position,
+                image2Position: groupImages[j].position,
+                similarity: sim,
+              });
+
+              console.log(
+                `⚠️ [区域检测] 分组 "${groupKey}" 发现可疑重复! 区域 ${REGION_NAMES[r]}: ` +
+                `${groupImages[i].position || `#${groupImages[i].imageIndex}`} ↔ ` +
+                `${groupImages[j].position || `#${groupImages[j].imageIndex}`} ` +
+                `(相似度: ${(sim * 100).toFixed(1)}%)`
+              );
+            }
+          }
+        }
+      }
+    }
+
+    console.log(`📊 [区域检测] 分组检测完成: ${groups.size} 个分组, ${allDuplicates.length} 个可疑重复`);
+
+    return {
+      hasDuplicate: allDuplicates.length > 0,
+      staticRegions: allStaticRegions,
+      duplicates: allDuplicates,
       totalImages,
     };
   }

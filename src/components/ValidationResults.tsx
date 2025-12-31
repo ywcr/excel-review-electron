@@ -30,9 +30,10 @@ const IMAGE_ERROR_TYPE_LABELS: Record<string, string> = {
   blur: "模糊",
   duplicate: "重复",
   suspicious: "可疑",
-  watermark: "水印",
   seasonMismatch: "季节不符",
   border: "边框",
+  regionDuplicate: "区域重复",
+  objectDuplicate: "物体重复",
 };
 
 export function ValidationResults({
@@ -62,11 +63,12 @@ export function ValidationResults({
   // 重复、边框、水印、季节不符 优先显示
   const IMAGE_ERROR_TYPE_ORDER: Record<string, number> = {
     duplicate: 1,
-    border: 2,
-    watermark: 3,
-    seasonMismatch: 4,
-    blur: 5,
-    suspicious: 6,
+    regionDuplicate: 2,
+    border: 3,
+    watermark: 4,
+    seasonMismatch: 5,
+    blur: 6,
+    suspicious: 7,
   };
 
   // 获取唯一的图片错误类型
@@ -226,10 +228,6 @@ export function ValidationResults({
             <div className="bg-zinc-50 rounded p-3 text-center border border-zinc-100">
               <span className="block text-xl font-bold text-zinc-700">{summary.imageStats.suspiciousImages}</span>
               <span className="text-[10px] font-bold text-zinc-500 uppercase">可疑</span>
-            </div>
-            <div className="bg-purple-50/50 rounded p-3 text-center border border-purple-100/50">
-              <span className="block text-xl font-bold text-purple-700">{summary.imageStats.watermarkedImages || 0}</span>
-              <span className="text-[10px] font-bold text-purple-600/70 uppercase">水印</span>
             </div>
             <div className="bg-blue-50/50 rounded p-3 text-center border border-blue-100/50">
               <span className="block text-xl font-bold text-blue-700">{summary.imageStats.seasonMismatchImages || 0}</span>
@@ -392,10 +390,11 @@ export function ValidationResults({
                     </td>
                     <td className="py-3 px-4">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${
-                        err.errorType === 'blur' ? 'bg-red-50 text-red-700 border-red-100' : 
+                        err.errorType === 'blur' ? 'bg-red-50 text-red-700 border-red-100' :
                         err.errorType === 'duplicate' ? 'bg-amber-50 text-amber-700 border-amber-100' :
+                        err.errorType === 'regionDuplicate' ? 'bg-orange-50 text-orange-700 border-orange-100' :
+                        err.errorType === 'objectDuplicate' ? 'bg-purple-50 text-purple-700 border-purple-100' :
                         err.errorType === 'border' ? 'bg-rose-50 text-rose-700 border-rose-100' :
-                        err.errorType === 'watermark' ? 'bg-purple-50 text-purple-700 border-purple-100' :
                         err.errorType === 'seasonMismatch' ? 'bg-blue-50 text-blue-700 border-blue-100' :
                         'bg-zinc-100 text-zinc-700 border-zinc-200'
                       }`}>
@@ -413,8 +412,17 @@ export function ValidationResults({
                             与 {err.details.duplicateOfPosition || `图片 #${err.details.duplicateOf}`} 重复
                           </span>
                         )}
-                        {err.details?.watermarkConfidence !== undefined && (
-                          <span className="text-xs text-purple-500">水印置信度: {err.details.watermarkConfidence.toFixed(0)}%</span>
+                        {err.details?.regionDuplicate && (
+                          <span className="text-xs text-orange-500">
+                            {err.details.regionDuplicate.image1Position} ↔ {err.details.regionDuplicate.image2Position}
+                            {' '}({err.details.regionDuplicate.regionName} 区域)
+                          </span>
+                        )}
+                        {err.details?.objectDuplicate && (
+                          <span className="text-xs text-purple-500">
+                            {err.details.objectDuplicate.objectClassCN}: {err.details.objectDuplicate.image1Position} ↔ {err.details.objectDuplicate.image2Position}
+                            {' '}(相似度: {(err.details.objectDuplicate.similarity * 100).toFixed(0)}%)
+                          </span>
                         )}
                         {err.details?.seasonMismatchReason && (
                           <span className="text-xs text-blue-500">{err.details.seasonMismatchReason}</span>
@@ -424,10 +432,14 @@ export function ValidationResults({
                     <td className="py-3 px-4 text-right">
                       <div className="flex items-center justify-end gap-2">
                         {/* 重复图片对比按钮 */}
-                        {err.errorType === 'duplicate' && err.imageData && err.details?.duplicateOfImageData && (
+                        {(err.errorType === 'duplicate' || err.errorType === 'regionDuplicate' || err.errorType === 'objectDuplicate') && err.imageData && err.details?.duplicateOfImageData && (
                           <button
                             onClick={() => setCompareImage(err)}
-                            className="text-xs font-medium text-amber-600 hover:text-amber-700 hover:underline cursor-pointer transition-colors"
+                            className={`text-xs font-medium hover:underline cursor-pointer transition-colors ${
+                              err.errorType === 'regionDuplicate' ? 'text-orange-600 hover:text-orange-700' :
+                              err.errorType === 'objectDuplicate' ? 'text-purple-600 hover:text-purple-700' :
+                              'text-amber-600 hover:text-amber-700'
+                            }`}
                           >
                             对比
                           </button>

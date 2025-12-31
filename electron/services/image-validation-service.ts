@@ -6,6 +6,8 @@ import {
   resetRegionalDuplicateDetector,
   RegionalDuplicateResult,
 } from "./regional-duplicate-detector";
+import { getObjectDuplicateDetector } from "./object-duplicate-detector";
+import type { ObjectDuplicateResult } from "../../shared/types/detection";
 
 interface WpsImage {
   buffer: Buffer;
@@ -42,7 +44,6 @@ export class ImageValidationService {
       blurryImages: number;
       duplicateImages: number;
       suspiciousImages: number;
-      watermarkedImages: number;
       seasonMismatchImages: number;
       borderImages: number;
     };
@@ -51,7 +52,6 @@ export class ImageValidationService {
       blurryImages: 0,
       duplicateImages: 0,
       suspiciousImages: 0,
-      watermarkedImages: 0,
       seasonMismatchImages: 0,
       borderImages: 0,
     };
@@ -89,11 +89,12 @@ export class ImageValidationService {
       console.log(`📷 [阶段二] 开始并行验证 ${images.length} 张图片...`);
       onProgress?.(84, `[5/6] 正在并行验证图片 (0/${images.length})...`);
 
-      // 根据 CPU 核心数自适应并发数（最小4，最大12）
+      // 根据 CPU 核心数自适应并发数，使用一半核心以平衡性能和内存
+      // 最小 2，最大 6（避免 CLIP + YOLO 同时处理过多图片导致内存爆炸）
       const cpuCount = os.cpus().length;
-      const concurrency = Math.max(4, Math.min(cpuCount, 12));
+      const concurrency = Math.max(2, Math.min(Math.floor(cpuCount / 2), 6));
       const limit = pLimit(concurrency);
-      console.log(`🚀 [并发控制] CPU核心数: ${cpuCount}, 设置并发数: ${concurrency}`);
+      console.log(`🚀 [并发控制] CPU核心数: ${cpuCount}, 设置并发数: ${concurrency} (使用一半核心)`);
 
       let completedCount = 0;
 
@@ -108,29 +109,20 @@ export class ImageValidationService {
               hashes[i]
             );
 
-            // 如果有问题，生成缩略图
-            let thumbnail: string | undefined = undefined; // Returns base64 string directly? 
-            // Original code: thumbnail: { data: string; mimeType: string } | null
-            // imageProcessor.createThumbnail returns Promise<{ data: string; mimeType: string }>
-            
-            // 检测是否有问题（包含水印、季节不符、边框）
-            const hasError = result.isBlurry || result.isDuplicate || result.suspicionScore >= 40 || 
-                            result.hasWatermark || !result.seasonMatchesCurrent || result.hasBorder;
-            if (hasError) {
-              const thumb = await this.imageValidator.imageProcessor.createThumbnail(image.buffer);
-              thumbnail = thumb.data;
-            }
+            // 检测是否有问题（季节不符、边框等）
+            const hasError = result.isBlurry || result.isDuplicate || result.suspicionScore >= 40 ||
+              !result.seasonMatchesCurrent || result.hasBorder;
 
+            // 只在有错误时生成缩略图（只生成一次）
             let thumbnailObj: { data: string; mimeType: string } | undefined = undefined;
             if (hasError) {
-               thumbnailObj = await this.imageValidator.imageProcessor.createThumbnail(image.buffer);
+              thumbnailObj = await this.imageValidator.imageProcessor.createThumbnail(image.buffer);
             }
 
             // 统计
             if (result.isBlurry) stats.blurryImages++;
             if (result.isDuplicate) stats.duplicateImages++;
             if (result.suspicionScore >= 40) stats.suspiciousImages++;
-            if (result.hasWatermark) stats.watermarkedImages++;
             if (!result.seasonMatchesCurrent && result.detectedSeason !== "unknown") stats.seasonMismatchImages++;
             if (result.hasBorder) stats.borderImages++;
 
@@ -144,12 +136,17 @@ export class ImageValidationService {
           } catch (err) {
             console.error(`Image ${i} validation failed:`, err);
             return null;
+          } finally {
+            // 每处理完一张图片，尝试释放内存
+            if (completedCount % 20 === 0 && global.gc) {
+              global.gc();
+            }
           }
         });
       });
 
       const processedResults = await Promise.all(validationPromises);
-      
+
       // 过滤 null
       processedResults.forEach(r => {
         if (r) results.push(r);
@@ -169,11 +166,19 @@ export class ImageValidationService {
    * 
    * @param images 要检测的图片数组
    * @param onProgress 进度回调
+   * @param useGrouped 是否使用分组检测（按 groupKey 分组后只在组内比较）
    * @returns 区域重复检测结果
    */
   async validateRegionalDuplicates(
-    images: WpsImage[],
-    onProgress?: (progress: number, message: string) => void
+    images: Array<{
+      buffer: Buffer;
+      range: any;
+      positionDesc?: string;
+      row?: number;
+      groupKey?: string;
+    }>,
+    onProgress?: (progress: number, message: string) => void,
+    useGrouped: boolean = false
   ): Promise<RegionalDuplicateResult> {
     // 重置检测器
     resetRegionalDuplicateDetector();
@@ -189,7 +194,7 @@ export class ImageValidationService {
     }
 
     try {
-      console.log(`🔳 [区域检测] 开始分析 ${images.length} 张图片...`);
+      console.log(`🔳 [区域检测] 开始分析 ${images.length} 张图片${useGrouped ? ' (分组模式)' : ''}...`);
       onProgress?.(0, `正在分析区域特征 (0/${images.length})...`);
 
       // 添加所有图片
@@ -201,7 +206,9 @@ export class ImageValidationService {
         await detector.addImage(
           images[i].buffer,
           i,
-          images[i].positionDesc
+          images[i].positionDesc,
+          images[i].row,
+          images[i].groupKey
         );
 
         const progress = Math.floor(((i + 1) / images.length) * 80);
@@ -210,12 +217,75 @@ export class ImageValidationService {
 
       // 执行检测
       onProgress?.(85, "正在检测可疑重复...");
-      const result = detector.detectDuplicates();
+      const result = useGrouped
+        ? detector.detectDuplicatesGrouped()
+        : detector.detectDuplicates();
 
       onProgress?.(100, `检测完成: ${result.duplicates.length} 个可疑重复`);
       return result;
     } catch (error) {
       console.error("区域重复检测失败:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * 执行物体重复检测（基于 YOLO + CLIP）
+   * 检测多张图片中重复出现的可移动物体（人物、车辆、物品等）
+   *
+   * @param images 要检测的图片数组
+   * @param onProgress 进度回调
+   * @returns 物体重复检测结果
+   */
+  async validateObjectDuplicates(
+    images: Array<{
+      buffer: Buffer;
+      positionDesc?: string;
+    }>,
+    onProgress?: (progress: number, message: string) => void
+  ): Promise<ObjectDuplicateResult> {
+    const detector = getObjectDuplicateDetector();
+
+    if (images.length < 2) {
+      return {
+        hasDuplicate: false,
+        duplicates: [],
+        totalObjectsDetected: 0,
+        totalImages: images.length,
+      };
+    }
+
+    try {
+      console.log(`🎯 [物体检测] 开始分析 ${images.length} 张图片中的可移动物体...`);
+      onProgress?.(0, `正在检测可移动物体 (0/${images.length})...`);
+
+      // 初始化检测器
+      const initialized = await detector.initialize();
+      if (!initialized) {
+        console.warn("物体重复检测器初始化失败");
+        return {
+          hasDuplicate: false,
+          duplicates: [],
+          totalObjectsDetected: 0,
+          totalImages: images.length,
+        };
+      }
+
+      // 转换格式
+      const imagesForDetection = images.map(img => ({
+        buffer: img.buffer,
+        position: img.positionDesc,
+      }));
+
+      // 执行检测
+      const result = await detector.detectDuplicates(imagesForDetection);
+
+      onProgress?.(100, `物体检测完成: 发现 ${result.duplicates.length} 组重复物体`);
+      console.log(`🎯 [物体检测] 完成: ${result.duplicates.length} 组重复, 共 ${result.totalObjectsDetected} 个物体`);
+
+      return result;
+    } catch (error) {
+      console.error("物体重复检测失败:", error);
       throw error;
     }
   }

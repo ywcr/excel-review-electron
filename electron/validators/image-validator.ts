@@ -6,13 +6,16 @@ import { ImageProcessor } from "../services/image-processor";
 import {
   IMAGE_DUP_CONFIG,
   BLUR_CONFIG,
+  MODEL_CONFIG,
 } from "../config/image-validation-config";
 import {
   calculateBlockhash,
   calculateHammingDistanceHex,
 } from "../services/blockhash";
-import { getClipDetector, Season } from "../services/clip-detector";
+import { getClipDetector } from "../services/clip-detector";
 import { SeasonValidator } from "./season-validator";
+import { validationLogger } from "../utils/logger";
+import type { Season, BorderDetectionResult } from "../../shared/types/detection";
 
 export interface ImageValidationResult {
   isBlurry: boolean;
@@ -32,9 +35,6 @@ export interface ImageValidationResult {
     size: number;
     megapixels: number;
   };
-  // 水印检测
-  hasWatermark: boolean;
-  watermarkConfidence: number;
   // 边框检测
   hasBorder: boolean;
   borderSides: string[];
@@ -64,70 +64,103 @@ export class ImageValidator {
   }
 
   /**
-   * 验证单张图片
-   * @param imageBuffer 图片 Buffer
-   * @param imageIndex 图片索引
-   * @param position 可选的图片位置描述，如 "行5 列M"
+   * 执行季节检测（使用 YOLO + CLIP）
+   * 提取公共逻辑，避免代码重复
    */
-  async validateImage(
+  private async performSeasonDetection(
     imageBuffer: Buffer,
-    imageIndex: number,
-    position?: string
-  ): Promise<ImageValidationResult> {
-    // 存储位置映射
-    if (position) {
-      this.imagePositions.set(imageIndex, position);
+    metadata: { width: number; height: number; format: string },
+    imageIndex: number
+  ): Promise<{
+    detectedSeason: Season;
+    seasonMatchesCurrent: boolean;
+    seasonMismatchReason?: string;
+    seasonConfidence: number;
+  }> {
+    // 默认值（模型禁用或检测跳过时返回）
+    const defaultResult = {
+      detectedSeason: "unknown" as Season,
+      seasonMatchesCurrent: true,
+      seasonMismatchReason: undefined,
+      seasonConfidence: 0,
+    };
+
+    // 检查模型总开关
+    if (!MODEL_CONFIG.ENABLE_MODEL) {
+      validationLogger.debug(`[图片 #${imageIndex}] AI 模型已禁用，跳过检测`);
+      return defaultResult;
     }
-    // 1. 获取元数据
-    const metadata = await this.imageProcessor.getImageMetadata(imageBuffer);
-    if (!metadata) {
-      throw new Error("Failed to read image metadata");
+
+    // 预筛选：只对足够大的图片进行检测
+    const shouldCheck = SeasonValidator.shouldCheckSeason(metadata);
+    validationLogger.debug(`[图片 #${imageIndex}] 尺寸: ${metadata.width}x${metadata.height}, 预筛选: ${shouldCheck ? '通过' : '跳过'}`);
+
+    if (!shouldCheck) {
+      return defaultResult;
     }
 
-    // 2. 模糊检测（使用与 PC Worker 一致的 Laplacian 方差算法）
-    const blurScore = await this.imageProcessor.detectBlur(imageBuffer);
-    const isBlurry = blurScore < this.BLUR_THRESHOLD;
+    try {
+      // 1. 先用 YOLO 检测是否有人物/植物
+      const { getYoloDetector } = await import("../services/yolo-detector");
+      const yoloDetector = getYoloDetector();
+      const detections = await yoloDetector.detect(imageBuffer);
 
-    // 3. 计算哈希用于重复检测（使用与 PC Worker 完全一致的 bmvbhash 算法）
-    const hashResult = await calculateBlockhash(
-      imageBuffer,
-      this.BLOCKHASH_BITS
-    );
-    const hash = hashResult.hash;
-    this.imageHashes.set(imageIndex, hash);
+      const hasPerson = detections.some(d => d.class === "person");
+      const hasPlant = detections.some(d => d.class === "potted plant");
 
-    // 4. 检测重复（使用与 PC Worker 一致的十六进制汉明距离）
-    const duplicateResult = this.checkDuplicate(hash, imageIndex);
+      validationLogger.debug(`[图片 #${imageIndex}] YOLO 检测: 人物=${hasPerson}, 植物=${hasPlant}`);
 
-    // 5. 边框检测
-    const borderResult = await this.imageProcessor.detectBorder(imageBuffer);
-
-    // 6. CLIP 检测（水印 + 季节）
-    let hasWatermark = false;
-    let watermarkConfidence = 0;
-    let detectedSeason: Season = "unknown";
-    let seasonMatchesCurrent = true;
-    let seasonMismatchReason: string | undefined;
-    let seasonConfidence = 0;
-
-    // 预筛选：只对足够大的图片进行 CLIP 检测
-    const shouldCheckWithClip = SeasonValidator.shouldCheckSeason(metadata);
-    if (shouldCheckWithClip) {
-      const clipDetector = getClipDetector();
-      const clipResult = await clipDetector.detect(imageBuffer);
-      if (clipResult) {
-        hasWatermark = clipResult.hasWatermark;
-        watermarkConfidence = clipResult.watermarkConfidence;
-        detectedSeason = clipResult.detectedSeason;
-        seasonConfidence = clipResult.seasonConfidence;
-
-        const seasonValidation = SeasonValidator.validate(clipResult);
-        seasonMatchesCurrent = seasonValidation.matchesCurrent;
-        seasonMismatchReason = seasonValidation.mismatchReason;
+      // 如果没有人也没有植物，跳过季节检测
+      if (!hasPerson && !hasPlant) {
+        validationLogger.debug(`[图片 #${imageIndex}] 无人物无植物，跳过季节检测`);
+        return defaultResult;
       }
-    }
 
-    // 7. 可疑度评分（简化版）
+      // 2. 使用 CLIP 进行季节检测
+      const clipDetector = getClipDetector();
+      validationLogger.debug(`[图片 #${imageIndex}] 开始 CLIP 季节检测...`);
+      const clipResult = await clipDetector.detect(imageBuffer, { hasPerson, hasPlant });
+
+      if (!clipResult) {
+        validationLogger.warn(`[图片 #${imageIndex}] CLIP 检测返回 null（模型可能未初始化）`);
+        return defaultResult;
+      }
+
+      // 3. 验证季节是否符合当前月份
+      const seasonValidation = SeasonValidator.validate(clipResult);
+
+      validationLogger.debug(`[图片 #${imageIndex}] 季节检测结果: ${clipResult.detectedSeason}, 匹配=${seasonValidation.matchesCurrent}`);
+
+      return {
+        detectedSeason: clipResult.detectedSeason,
+        seasonMatchesCurrent: seasonValidation.matchesCurrent,
+        seasonMismatchReason: seasonValidation.mismatchReason,
+        seasonConfidence: clipResult.seasonConfidence,
+      };
+    } catch (error) {
+      validationLogger.error(`[图片 #${imageIndex}] 季节检测失败:`, error);
+      return defaultResult;
+    }
+  }
+
+  /**
+   * 构建最终验证结果
+   * 提取公共逻辑，避免代码重复
+   */
+  private buildValidationResult(
+    isBlurry: boolean,
+    blurScore: number,
+    duplicateResult: { isDuplicate: boolean; duplicateOf?: number; duplicateOfPosition?: string },
+    metadata: { width: number; height: number; format: string; size: number; megapixels: number; exif?: Record<string, unknown> },
+    borderResult: BorderDetectionResult,
+    seasonResult: {
+      detectedSeason: Season;
+      seasonMatchesCurrent: boolean;
+      seasonMismatchReason?: string;
+      seasonConfidence: number;
+    }
+  ): ImageValidationResult {
+    // 可疑度评分（移除水印相关参数）
     const suspicionResult = this.calculateSuspicionScore({
       width: metadata.width,
       height: metadata.height,
@@ -138,9 +171,9 @@ export class ImageValidator {
       hasBorder: borderResult.hasBorder,
       borderSides: borderResult.borderSides,
       borderWidth: borderResult.borderWidth,
-      hasWatermark,
+      hasWatermark: false,
       watermarkRegions: [],
-      watermarkConfidence,
+      watermarkConfidence: 0,
     });
 
     return {
@@ -160,16 +193,65 @@ export class ImageValidator {
         size: metadata.size,
         megapixels: metadata.megapixels,
       },
-      hasWatermark,
-      watermarkConfidence,
       hasBorder: borderResult.hasBorder,
       borderSides: borderResult.borderSides,
       borderWidth: borderResult.borderWidth,
-      detectedSeason,
-      seasonMatchesCurrent,
-      seasonMismatchReason,
-      seasonConfidence,
+      detectedSeason: seasonResult.detectedSeason,
+      seasonMatchesCurrent: seasonResult.seasonMatchesCurrent,
+      seasonMismatchReason: seasonResult.seasonMismatchReason,
+      seasonConfidence: seasonResult.seasonConfidence,
     };
+  }
+
+  /**
+   * 验证单张图片
+   * @param imageBuffer 图片 Buffer
+   * @param imageIndex 图片索引
+   * @param position 可选的图片位置描述，如 "行5 列M"
+   */
+  async validateImage(
+    imageBuffer: Buffer,
+    imageIndex: number,
+    position?: string
+  ): Promise<ImageValidationResult> {
+    // 存储位置映射
+    if (position) {
+      this.imagePositions.set(imageIndex, position);
+    }
+
+    // 1. 获取元数据
+    const metadata = await this.imageProcessor.getImageMetadata(imageBuffer);
+    if (!metadata) {
+      throw new Error("Failed to read image metadata");
+    }
+
+    // 2. 模糊检测（使用与 PC Worker 一致的 Laplacian 方差算法）
+    const blurScore = await this.imageProcessor.detectBlur(imageBuffer);
+    const isBlurry = blurScore < this.BLUR_THRESHOLD;
+
+    // 3. 计算哈希用于重复检测（使用与 PC Worker 完全一致的 bmvbhash 算法）
+    const hashResult = await calculateBlockhash(imageBuffer, this.BLOCKHASH_BITS);
+    const hash = hashResult.hash;
+    this.imageHashes.set(imageIndex, hash);
+
+    // 4. 检测重复（使用与 PC Worker 一致的十六进制汉明距离）
+    const duplicateResult = this.checkDuplicate(hash, imageIndex);
+
+    // 5. 边框检测
+    const borderResult = await this.imageProcessor.detectBorder(imageBuffer);
+
+    // 6. 季节检测 - 使用提取的公共方法
+    const seasonResult = await this.performSeasonDetection(imageBuffer, metadata, imageIndex);
+
+    // 7. 构建并返回结果 - 使用提取的公共方法
+    return this.buildValidationResult(
+      isBlurry,
+      blurScore,
+      duplicateResult,
+      metadata,
+      borderResult,
+      seasonResult
+    );
   }
 
   /**
@@ -181,15 +263,15 @@ export class ImageValidator {
     onProgress?: (current: number, total: number) => void
   ): Promise<string[]> {
     const hashes: string[] = [];
-    
+
     for (let i = 0; i < images.length; i++) {
       const img = images[i];
-      
+
       // 存储位置映射
       if (img.position) {
         this.imagePositions.set(i, img.position);
       }
-      
+
       // 计算哈希
       const hashResult = await calculateBlockhash(
         img.buffer,
@@ -198,10 +280,10 @@ export class ImageValidator {
       const hash = hashResult.hash;
       this.imageHashes.set(i, hash);
       hashes.push(hash);
-      
+
       onProgress?.(i + 1, images.length);
     }
-    
+
     return hashes;
   }
 
@@ -228,87 +310,24 @@ export class ImageValidator {
       throw new Error("Failed to read image metadata");
     }
 
-    // 模糊判断（Laplacian 方法）
+    // 2. 模糊判断（Laplacian 方法）
     const isBlurry = blurScore < this.BLUR_THRESHOLD;
 
-    // 2. 检测重复（使用预计算的哈希）
+    // 3. 检测重复（使用预计算的哈希）
     const duplicateResult = this.checkDuplicate(precomputedHash, imageIndex);
 
-    // 3. CLIP 检测（水印 + 季节）
-    let hasWatermark = false;
-    let watermarkConfidence = 0;
-    let detectedSeason: Season = "unknown";
-    let seasonMatchesCurrent = true;
-    let seasonMismatchReason: string | undefined;
-    let seasonConfidence = 0;
+    // 4. 季节检测 - 使用提取的公共方法
+    const seasonResult = await this.performSeasonDetection(imageBuffer, metadata, imageIndex);
 
-    // 预筛选：只对足够大的图片进行 CLIP 检测
-    const shouldCheckWithClip = SeasonValidator.shouldCheckSeason(metadata);
-    console.log(`🖼️ [图片 #${imageIndex}] 尺寸: ${metadata.width}x${metadata.height}, 预筛选: ${shouldCheckWithClip ? '通过' : '跳过'}`);
-    
-    if (shouldCheckWithClip) {
-      const clipDetector = getClipDetector();
-      console.log(`🔍 [图片 #${imageIndex}] 开始 CLIP 检测...`);
-      const clipResult = await clipDetector.detect(imageBuffer);
-      if (clipResult) {
-        hasWatermark = clipResult.hasWatermark;
-        watermarkConfidence = clipResult.watermarkConfidence;
-        detectedSeason = clipResult.detectedSeason;
-        seasonConfidence = clipResult.seasonConfidence;
-
-        const seasonValidation = SeasonValidator.validate(clipResult);
-        seasonMatchesCurrent = seasonValidation.matchesCurrent;
-        seasonMismatchReason = seasonValidation.mismatchReason;
-        
-        console.log(`✅ [图片 #${imageIndex}] CLIP 结果: 水印=${hasWatermark}, 季节=${detectedSeason}, 季节匹配=${seasonMatchesCurrent}`);
-      } else {
-        console.log(`⚠️ [图片 #${imageIndex}] CLIP 检测返回 null（模型可能未初始化）`);
-      }
-    }
-
-    // 4. 可疑度评分
-    const suspicionResult = this.calculateSuspicionScore({
-      width: metadata.width,
-      height: metadata.height,
-      megapixels: metadata.megapixels,
-      mimeType: `image/${metadata.format}`,
-      sizeBytes: metadata.size,
-      exif: metadata.exif,
-      hasBorder: borderResult.hasBorder,
-      borderSides: borderResult.borderSides,
-      borderWidth: borderResult.borderWidth,
-      hasWatermark,
-      watermarkRegions: [],
-      watermarkConfidence,
-    });
-
-    return {
+    // 5. 构建并返回结果 - 使用提取的公共方法
+    return this.buildValidationResult(
       isBlurry,
       blurScore,
-      isDuplicate: duplicateResult.isDuplicate,
-      duplicateOf: duplicateResult.duplicateOf,
-      duplicateOfPosition: duplicateResult.duplicateOfPosition,
-      suspicionScore: suspicionResult.suspicionScore,
-      suspicionLevel: suspicionResult.suspicionLevel,
-      suspicionLabel: suspicionResult.suspicionLabel,
-      suspicionFactors: suspicionResult.factors,
-      metadata: {
-        width: metadata.width,
-        height: metadata.height,
-        format: metadata.format,
-        size: metadata.size,
-        megapixels: metadata.megapixels,
-      },
-      hasWatermark,
-      watermarkConfidence,
-      hasBorder: borderResult.hasBorder,
-      borderSides: borderResult.borderSides,
-      borderWidth: borderResult.borderWidth,
-      detectedSeason,
-      seasonMatchesCurrent,
-      seasonMismatchReason,
-      seasonConfidence,
-    };
+      duplicateResult,
+      metadata,
+      borderResult,
+      seasonResult
+    );
   }
 
   /**
@@ -323,11 +342,9 @@ export class ImageValidator {
     duplicateOf?: number;
     duplicateOfPosition?: string;
   } {
-    // 添加调试日志
+    // 调试日志：仅输出前几张图片
     if (currentIndex < 5) {
-      console.log(
-        `📷 [重复检测] 图片 #${currentIndex} 哈希: ${hash} (长度: ${hash.length})`
-      );
+      validationLogger.debug(`图片 #${currentIndex} 哈希: ${hash} (长度: ${hash.length})`);
     }
 
     for (const [index, existingHash] of this.imageHashes) {
@@ -338,17 +355,13 @@ export class ImageValidator {
 
       // 调试日志：输出前几张图片的比较结果
       if (currentIndex < 10 && index < 5) {
-        console.log(
-          `  比较 #${currentIndex} vs #${index}: 汉明距离 = ${distance}`
-        );
+        validationLogger.debug(`比较 #${currentIndex} vs #${index}: 汉明距离 = ${distance}`);
       }
 
       if (distance <= this.DUPLICATE_THRESHOLD) {
         // 获取原始图片的位置信息
         const duplicateOfPosition = this.imagePositions.get(index) || `图片 #${index + 1}`;
-        console.log(
-          `📷 [重复检测] 发现重复! 图片 #${currentIndex} 与 ${duplicateOfPosition} 重复，汉明距离: ${distance}`
-        );
+        validationLogger.info(`发现重复! 图片 #${currentIndex} 与 ${duplicateOfPosition} 重复，汉明距离: ${distance}`);
         return {
           isDuplicate: true,
           duplicateOf: index,

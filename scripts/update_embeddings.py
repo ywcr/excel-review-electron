@@ -20,11 +20,25 @@ model.eval()
 new_texts = [
     "a photo with semi-transparent text or logo watermark",
     "a photo with faint watermark in the corner",
-    # 新增的季节检测提示词（春夏秋冬四季）
+    # 季节检测提示词（春夏秋冬四季）- 场景
     "winter scenery with bare leafless trees, snow, frost, dry branches or cold weather",
     "autumn scenery with golden yellow and orange leaves falling from trees",
     "summer scenery with dense green foliage, bright sunshine and blue sky",
     "spring scenery with cherry blossoms, colorful flowers blooming, and fresh green leaves",
+    # 模糊检测 prompts
+    "a blurry, out of focus, or motion blurred photo",
+    "a sharp, clear, and in-focus photo",
+    # 场景类型检测 prompts
+    "indoor shop, store, pharmacy, supermarket, or retail space with product shelves and merchandise",
+    "urban city street scene with buildings, roads, sidewalks, and no trees or plants visible",
+    "outdoor natural scene with trees, plants, grass, flowers, or green vegetation",
+    "other scene or mixed environment",
+    # 简化版穿着季节 prompts (v4 - 最终版)
+    "person in puffy down jacket or thick winter coat",
+    "person in sweater, cardigan, or light coat",
+    "person in t-shirt, shorts, or summer dress",
+    "person in thin jacket or light clothes",
+    "no person in the image",
 ]
 
 # 需要删除的旧提示词
@@ -33,6 +47,14 @@ old_texts_to_remove = [
     "autumn scenery with yellow, orange, or red falling leaves",
     "summer scenery with lush green trees and bright sunshine",
     "spring scenery with blooming flowers and fresh green buds",
+    # 旧的穿着季节 prompts (所有历史版本)
+    "person wearing heavy winter down jacket with fur hood or collar, thick puffer coat, scarf, gloves, or beanie",
+    "person wearing light spring clothes like thin jacket, hoodie, light cardigan, or casual wear",
+    "person wearing thick puffy winter coat, bulky down jacket, padded puffer jacket, heavy insulated outerwear",
+    "person wearing thin spring jacket, light windbreaker, or single layer casual clothes without thick padding",
+    "person wearing very thick puffy inflated down jacket, oversized bulky puffer coat with visible quilted padding, heavy winter outerwear",
+    "person wearing thin fitted jacket, light unpadded windbreaker, slim casual clothes, no thick puffy outerwear",
+    "no person visible in the image",
 ]
 
 # 加载现有的嵌入

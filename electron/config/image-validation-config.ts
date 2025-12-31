@@ -5,6 +5,16 @@
  * 第 74-82 行, 第 2745 行, 第 3268 行
  */
 
+// ==================== 模型配置 ====================
+export const MODEL_CONFIG = {
+  /**
+   * 是否启用 AI 模型检测（总开关）
+   * 包含：CLIP 水印检测、季节检测、场景识别；YOLO 物体检测
+   * 关闭后将跳过所有模型推理，返回默认值
+   */
+  ENABLE_MODEL: true,
+};
+
 // 图片重复检测配置 (对应 Worker 第 74-82 行)
 export const IMAGE_DUP_CONFIG = {
   // blockhash 位数 - PC Worker 使用 blockhash-core.js 的 bmvbhash 算法
@@ -70,14 +80,15 @@ export const REGIONAL_DUPLICATE_CONFIG = {
   GRID_SIZE: 3,
 
   // 静态区域判定阈值：区域在所有图片间的平均相似度 > 此值则判定为静态（固定物体如招牌）
-  STATIC_THRESHOLD: 0.80,
+  STATIC_THRESHOLD: 0.85,
 
   // 重复物体判定阈值：非静态区域相似度 > 此值则判定为可疑重复
-  DUPLICATE_THRESHOLD: 0.85,
+  // 设置为 0.92 以减少误报，只有非常相似的区域才会被标记
+  DUPLICATE_THRESHOLD: 0.92,
 
   // 最小静态比例：区域在多少比例的图片对中相似才算静态
-  MIN_STATIC_RATIO: 0.7,
+  MIN_STATIC_RATIO: 0.6,
 
   // 最小图片数量：至少需要多少张图片才进行区域重复检测
-  MIN_IMAGES: 2,
+  MIN_IMAGES: 3,
 };
