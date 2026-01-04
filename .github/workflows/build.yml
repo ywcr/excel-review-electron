@@ -38,6 +38,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Clean release directory
+        run: rm -rf release
+
       - name: Build Electron app
         run: npx tsc && npx vite build && npx electron-builder --publish never
         env:
