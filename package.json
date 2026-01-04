@@ -56,7 +56,8 @@
       "!node_modules/*/{CHANGELOG.md,README.md,readme.md,readme,test,__tests__,tests,*.d.ts}",
       "!node_modules/.bin",
       "!node_modules/onnxruntime-*/**",
-      "!node_modules/extract-zip/**"
+      "!node_modules/extract-zip/**",
+      "!node_modules/@img/**"
     ],
     "asar": true,
     "includeSubNodeModules": true,
