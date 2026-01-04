@@ -52,9 +52,14 @@
       "dist-electron",
       "node_modules/**/*",
       "!node_modules/.cache",
+      "!node_modules/.pnpm",
       "!node_modules/*/{CHANGELOG.md,README.md,readme.md,readme,test,__tests__,tests,*.d.ts}",
-      "!node_modules/.bin"
+      "!node_modules/.bin",
+      "!node_modules/onnxruntime-*/**",
+      "!node_modules/extract-zip/**"
     ],
+    "asar": true,
+    "includeSubNodeModules": true,
     "asarUnpack": [
       "node_modules/sharp/**/*"
     ],
