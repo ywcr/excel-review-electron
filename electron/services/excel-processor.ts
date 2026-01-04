@@ -12,6 +12,9 @@ import { WpsImageExtractor } from "./wps-image-extractor";
 import { XlsxParser } from "./xlsx-parser";
 import { ImageValidationService } from "./image-validation-service";
 
+// 连续空行阈值：超过此数量的连续空行则认为数据已结束（防止"幽灵行"问题）
+const MAX_CONSECUTIVE_EMPTY_ROWS = 100;
+
 export class ExcelStreamProcessor {
   private isCancelled = false;
   private xlsxParser: XlsxParser;
@@ -124,6 +127,7 @@ export class ExcelStreamProcessor {
       let headerMapping: Record<number, string> = {}; // This variable is declared but not used in the provided snippet. Keeping it as per instruction.
       let headerRowIndex = 0;
       let rowIndex = 0;
+      let consecutiveEmptyRows = 0; // 连续空行计数器
 
       console.log(`🔎 [开始扫描] 工作表 "${currentSheetName}" 查找表头...`);
       for await (const row of worksheetReader) {
@@ -182,8 +186,18 @@ export class ExcelStreamProcessor {
 
           if (isEmptyRow) {
             // 跳过空行，不计入数据行数，不验证
+            // 检测连续空行，超过阈值则认为数据已结束（防止"幽灵行"问题）
+            consecutiveEmptyRows++;
+            if (consecutiveEmptyRows >= MAX_CONSECUTIVE_EMPTY_ROWS) {
+              console.log(`⚠️ [幽灵行检测] 连续 ${MAX_CONSECUTIVE_EMPTY_ROWS} 行空行，停止处理`);
+              console.log(`   当前行号: ${rowIndex}, 已处理有效行: ${totalRows}`);
+              break;
+            }
             continue;
           }
+
+          // 有内容的行，重置空行计数
+          consecutiveEmptyRows = 0;
 
           // 转换为对象格式
           const rowData = this.xlsxParser.arrayToObject(rowArray, headerRow, template);
