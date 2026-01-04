@@ -49,7 +49,11 @@
     },
     "files": [
       "dist",
-      "dist-electron"
+      "dist-electron",
+      "node_modules/**/*",
+      "!node_modules/.cache",
+      "!node_modules/*/{CHANGELOG.md,README.md,readme.md,readme,test,__tests__,tests,*.d.ts}",
+      "!node_modules/.bin"
     ],
     "asarUnpack": [
       "node_modules/sharp/**/*"

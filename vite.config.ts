@@ -8,6 +8,14 @@ import { builtinModules } from "module";
 const nativeModules = [
   "electron",
   "sharp",
+  // exceljs and its dependency chain (including pako)
+  "exceljs",
+  "jszip",
+  "adm-zip",
+  "yauzl",
+  "p-limit",
+  "electron-store",
+  "electron-updater",
   ...builtinModules,
   ...builtinModules.map((m) => `node:${m}`),
 ];
