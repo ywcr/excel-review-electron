@@ -61,7 +61,8 @@
     "asar": true,
     "includeSubNodeModules": true,
     "asarUnpack": [
-      "node_modules/sharp/**/*"
+      "node_modules/sharp/**/*",
+      "node_modules/@img/**/*"
     ],
     "mac": {
       "target": [
