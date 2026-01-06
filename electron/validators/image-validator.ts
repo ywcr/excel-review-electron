@@ -107,8 +107,12 @@ export class ImageValidator {
 
       const hasPerson = detections.some(d => d.class === "person");
       const hasPlant = detections.some(d => d.class === "potted plant");
-
-      validationLogger.debug(`[图片 #${imageIndex}] YOLO 检测: 人物=${hasPerson}, 植物=${hasPlant}`);
+      
+      // 输出检测到的类别（用于诊断）
+      const detectedClasses = [...new Set(detections.map(d => d.class))];
+      if (detectedClasses.length > 0) {
+        validationLogger.info(`[图片 #${imageIndex}] YOLO 检测到: ${detectedClasses.join(", ")} (人物=${hasPerson}, 植物=${hasPlant})`);
+      }
 
       // 如果没有人也没有植物，跳过季节检测
       if (!hasPerson && !hasPlant) {

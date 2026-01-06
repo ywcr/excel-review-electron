@@ -17,7 +17,7 @@ export interface ImageValidationError {
   column?: string;
   field?: string;
   imageIndex: number;
-  errorType: "blur" | "duplicate" | "suspicious" | "seasonMismatch" | "border" | "regionDuplicate" | "objectDuplicate";
+  errorType: "blur" | "duplicate" | "suspicious" | "seasonMismatch" | "border" | "objectDuplicate";
   message: string;
   details?: {
     blurScore?: number;
@@ -36,16 +36,7 @@ export interface ImageValidationError {
     borderSides?: string[];
     /** 边框宽度 */
     borderWidth?: Record<string, number>;
-    /** 区域重复检测结果 */
-    regionDuplicate?: {
-      regionIndex: number;
-      regionName: string;
-      image1Index: number;
-      image2Index: number;
-      image1Position?: string;
-      image2Position?: string;
-      similarity: number;
-    };
+
     /** 物体重复检测结果 */
     objectDuplicate?: {
       objectClass: string;

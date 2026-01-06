@@ -1,13 +1,9 @@
 import pLimit from "p-limit";
 import * as os from "os";
 import { ImageValidator, ImageValidationResult } from "../validators/image-validator";
-import {
-  getRegionalDuplicateDetector,
-  resetRegionalDuplicateDetector,
-  RegionalDuplicateResult,
-} from "./regional-duplicate-detector";
 import { getObjectDuplicateDetector } from "./object-duplicate-detector";
 import type { ObjectDuplicateResult } from "../../shared/types/detection";
+
 
 interface WpsImage {
   buffer: Buffer;
@@ -158,75 +154,6 @@ export class ImageValidationService {
     }
 
     return { results, stats };
-  }
-
-  /**
-   * 执行区域重复检测
-   * 检测多张图片中重复出现的相同物体/人物（排除固定招牌）
-   * 
-   * @param images 要检测的图片数组
-   * @param onProgress 进度回调
-   * @param useGrouped 是否使用分组检测（按 groupKey 分组后只在组内比较）
-   * @returns 区域重复检测结果
-   */
-  async validateRegionalDuplicates(
-    images: Array<{
-      buffer: Buffer;
-      range: any;
-      positionDesc?: string;
-      row?: number;
-      groupKey?: string;
-    }>,
-    onProgress?: (progress: number, message: string) => void,
-    useGrouped: boolean = false
-  ): Promise<RegionalDuplicateResult> {
-    // 重置检测器
-    resetRegionalDuplicateDetector();
-    const detector = getRegionalDuplicateDetector();
-
-    if (images.length < 2) {
-      return {
-        hasDuplicate: false,
-        staticRegions: [],
-        duplicates: [],
-        totalImages: images.length,
-      };
-    }
-
-    try {
-      console.log(`🔳 [区域检测] 开始分析 ${images.length} 张图片${useGrouped ? ' (分组模式)' : ''}...`);
-      onProgress?.(0, `正在分析区域特征 (0/${images.length})...`);
-
-      // 添加所有图片
-      for (let i = 0; i < images.length; i++) {
-        if (this.isCancelled) {
-          throw new Error("Regional detection cancelled");
-        }
-
-        await detector.addImage(
-          images[i].buffer,
-          i,
-          images[i].positionDesc,
-          images[i].row,
-          images[i].groupKey
-        );
-
-        const progress = Math.floor(((i + 1) / images.length) * 80);
-        onProgress?.(progress, `正在分析区域特征 (${i + 1}/${images.length})...`);
-      }
-
-      // 执行检测
-      onProgress?.(85, "正在检测可疑重复...");
-      const result = useGrouped
-        ? detector.detectDuplicatesGrouped()
-        : detector.detectDuplicates();
-
-      onProgress?.(100, `检测完成: ${result.duplicates.length} 个可疑重复`);
-      return result;
-    } catch (error) {
-      console.error("区域重复检测失败:", error);
-      throw error;
-    }
   }
 
   /**

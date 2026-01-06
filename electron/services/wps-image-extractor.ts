@@ -78,7 +78,8 @@ export class WpsImageExtractor {
       // 获取目标工作表的 DISPIMG 位置
       const worksheetPositions = await this.getPositionsFromWorksheets(
         xmlFiles.worksheets,
-        targetSheet
+        targetSheet,
+        xmlFiles.workbookXml  // 传入 workbook.xml 用于解析 sheet 名称
       );
 
       // 第三步：组装图片数据
@@ -313,16 +314,49 @@ export class WpsImageExtractor {
 
   /**
    * 从工作表 XML 中提取 DISPIMG 位置映射
+   * 如果指定了 targetSheet，则只返回该工作表中的图片位置
    */
   private async getPositionsFromWorksheets(
     worksheets: Map<string, string>,
-    targetSheet?: string
+    targetSheet?: string,
+    workbookXml?: string | null
   ): Promise<Map<string, Array<{ position: string; row: number; column: string; type: string }>>> {
     const positionsMap = new Map<string, Array<{ position: string; row: number; column: string; type: string }>>();
 
+    // 如果指定了目标工作表，需要找出对应的 sheet 文件
+    let targetSheetIndex: number | null = null;
+    
+    if (targetSheet && workbookXml) {
+      // 从 workbook.xml 中解析 sheet 名称和顺序
+      // 格式: <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+      const sheetRegex = /<sheet[^>]*name="([^"]*)"[^>]*\/>/g;
+      let match;
+      let index = 1;
+      
+      while ((match = sheetRegex.exec(workbookXml)) !== null) {
+        const sheetName = match[1];
+        if (sheetName === targetSheet) {
+          targetSheetIndex = index;
+          console.log(`📷 [WPS提取] 目标工作表: "${targetSheet}" -> sheet${targetSheetIndex}.xml`);
+          break;
+        }
+        index++;
+      }
+      
+      if (targetSheetIndex === null) {
+        console.log(`📷 [WPS提取] 警告: 未找到工作表 "${targetSheet}"，将处理所有工作表`);
+      }
+    }
+
     for (const [fileName, xml] of worksheets) {
-      // 如果指定了目标工作表，可以在这里过滤
-      // 目前先处理所有工作表
+      // 如果指定了目标工作表，只处理对应的 sheet 文件
+      if (targetSheetIndex !== null) {
+        const expectedFileName = `xl/worksheets/sheet${targetSheetIndex}.xml`;
+        if (fileName !== expectedFileName) {
+          continue;  // 跳过非目标工作表
+        }
+        console.log(`📷 [WPS提取] 处理目标工作表文件: ${fileName}`);
+      }
 
       // 查找包含 DISPIMG 公式的单元格
       const cellRegex = /<c[^>]*r="([^"]*)"[^>]*>([\s\S]*?)<\/c>/g;
@@ -367,6 +401,10 @@ export class WpsImageExtractor {
         }
       }
     }
+
+    // 日志输出找到的图片数量
+    const totalPositions = Array.from(positionsMap.values()).reduce((sum, arr) => sum + arr.length, 0);
+    console.log(`📷 [WPS提取] ${targetSheet ? `工作表"${targetSheet}"` : '所有工作表'}共找到 ${totalPositions} 个图片位置`);
 
     return positionsMap;
   }

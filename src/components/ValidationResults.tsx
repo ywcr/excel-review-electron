@@ -32,7 +32,7 @@ const IMAGE_ERROR_TYPE_LABELS: Record<string, string> = {
   suspicious: "可疑",
   seasonMismatch: "季节不符",
   border: "边框",
-  regionDuplicate: "区域重复",
+
   objectDuplicate: "物体重复",
 };
 
@@ -54,16 +54,18 @@ export function ValidationResults({
   const [compareImage, setCompareImage] = useState<ImageValidationError | null>(
     null
   );
+  // 当前对比的索引（用于导航）
+  const [compareIndex, setCompareIndex] = useState<number>(0);
   const errorsPerPage = 20;
   const imageErrorsPerPage = 20;
 
   const { errors, summary, imageErrors } = result;
 
   // 图片错误类型优先级（用于排序）
-  // 重复、边框、水印、季节不符 优先显示
+  // 重复类优先显示，其次是边框、季节不符等
   const IMAGE_ERROR_TYPE_ORDER: Record<string, number> = {
     duplicate: 1,
-    regionDuplicate: 2,
+    objectDuplicate: 2,
     border: 3,
     watermark: 4,
     seasonMismatch: 5,
@@ -94,6 +96,17 @@ export function ValidationResults({
       return a.imageIndex - b.imageIndex;
     });
   }, [imageErrors, imageFilterType]);
+
+  // 筛选出可对比的重复图片错误（有对比数据的）
+  const duplicateErrorsForCompare = useMemo(() => {
+    if (!imageErrors) return [];
+    return imageErrors.filter(
+      (e) => 
+        (e.errorType === "duplicate" || e.errorType === "objectDuplicate") &&
+        e.imageData &&
+        e.details?.duplicateOfImageData
+    );
+  }, [imageErrors]);
 
   // 获取唯一的错误类型
   const errorTypes = Array.from(new Set(errors.map((e) => e.errorType)));
@@ -392,7 +405,7 @@ export function ValidationResults({
                       <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${
                         err.errorType === 'blur' ? 'bg-red-50 text-red-700 border-red-100' :
                         err.errorType === 'duplicate' ? 'bg-amber-50 text-amber-700 border-amber-100' :
-                        err.errorType === 'regionDuplicate' ? 'bg-orange-50 text-orange-700 border-orange-100' :
+
                         err.errorType === 'objectDuplicate' ? 'bg-purple-50 text-purple-700 border-purple-100' :
                         err.errorType === 'border' ? 'bg-rose-50 text-rose-700 border-rose-100' :
                         err.errorType === 'seasonMismatch' ? 'bg-blue-50 text-blue-700 border-blue-100' :
@@ -412,12 +425,7 @@ export function ValidationResults({
                             与 {err.details.duplicateOfPosition || `图片 #${err.details.duplicateOf}`} 重复
                           </span>
                         )}
-                        {err.details?.regionDuplicate && (
-                          <span className="text-xs text-orange-500">
-                            {err.details.regionDuplicate.image1Position} ↔ {err.details.regionDuplicate.image2Position}
-                            {' '}({err.details.regionDuplicate.regionName} 区域)
-                          </span>
-                        )}
+
                         {err.details?.objectDuplicate && (
                           <span className="text-xs text-purple-500">
                             {err.details.objectDuplicate.objectClassCN}: {err.details.objectDuplicate.image1Position} ↔ {err.details.objectDuplicate.image2Position}
@@ -432,11 +440,15 @@ export function ValidationResults({
                     <td className="py-3 px-4 text-right">
                       <div className="flex items-center justify-end gap-2">
                         {/* 重复图片对比按钮 */}
-                        {(err.errorType === 'duplicate' || err.errorType === 'regionDuplicate' || err.errorType === 'objectDuplicate') && err.imageData && err.details?.duplicateOfImageData && (
+                        {(err.errorType === 'duplicate' || err.errorType === 'objectDuplicate') && err.imageData && err.details?.duplicateOfImageData && (
                           <button
-                            onClick={() => setCompareImage(err)}
+                            onClick={() => {
+                              // 找到当前错误在可对比列表中的索引
+                              const idx = duplicateErrorsForCompare.findIndex(e => e === err);
+                              setCompareIndex(idx >= 0 ? idx : 0);
+                              setCompareImage(err);
+                            }}
                             className={`text-xs font-medium hover:underline cursor-pointer transition-colors ${
-                              err.errorType === 'regionDuplicate' ? 'text-orange-600 hover:text-orange-700' :
                               err.errorType === 'objectDuplicate' ? 'text-purple-600 hover:text-purple-700' :
                               'text-amber-600 hover:text-amber-700'
                             }`}
@@ -524,6 +536,22 @@ export function ValidationResults({
             imageData: compareImage.details.duplicateOfImageData,
             position: compareImage.details.duplicateOfPosition || `图片 #${compareImage.details.duplicateOf}`,
             imageIndex: compareImage.details.duplicateOf || 0,
+          }}
+          currentIndex={compareIndex}
+          totalCount={duplicateErrorsForCompare.length}
+          onPrev={() => {
+            if (compareIndex > 0) {
+              const prevErr = duplicateErrorsForCompare[compareIndex - 1];
+              setCompareIndex(compareIndex - 1);
+              setCompareImage(prevErr);
+            }
+          }}
+          onNext={() => {
+            if (compareIndex < duplicateErrorsForCompare.length - 1) {
+              const nextErr = duplicateErrorsForCompare[compareIndex + 1];
+              setCompareIndex(compareIndex + 1);
+              setCompareImage(nextErr);
+            }
           }}
         />
       )}
