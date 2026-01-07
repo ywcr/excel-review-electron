@@ -102,7 +102,15 @@ interface ImageModalProps {
     isDuplicate?: boolean;
     suspicionScore?: number;
     suspicionLevel?: string;
+    errorMessage?: string;
+    errorType?: string;
+    seasonMismatchReason?: string;
   };
+  // 导航相关属性
+  currentIndex?: number;
+  totalCount?: number;
+  onPrev?: () => void;
+  onNext?: () => void;
 }
 
 export function ImageModal({
@@ -113,31 +121,77 @@ export function ImageModal({
   isOpen,
   onClose,
   details,
+  currentIndex = 0,
+  totalCount = 1,
+  onPrev,
+  onNext,
 }: ImageModalProps) {
-  // ESC 键关闭
+  // 键盘导航（ESC关闭，左右箭头切换）
   useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
+      if (e.key === "ArrowLeft" && onPrev) onPrev();
+      if (e.key === "ArrowRight" && onNext) onNext();
     };
     if (isOpen) {
-      document.addEventListener("keydown", handleEsc);
+      document.addEventListener("keydown", handleKeyDown);
       document.body.style.overflow = "hidden";
     }
     return () => {
-      document.removeEventListener("keydown", handleEsc);
+      document.removeEventListener("keydown", handleKeyDown);
       document.body.style.overflow = "";
     };
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, onPrev, onNext]);
+
+  const hasPrev = currentIndex > 0;
+  const hasNext = currentIndex < totalCount - 1;
 
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden relative" onClick={(e) => e.stopPropagation()}>
+        {/* 左侧导航按钮 */}
+        {totalCount > 1 && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onPrev?.(); }}
+            disabled={!hasPrev}
+            className={`absolute left-2 top-1/2 -translate-y-1/2 z-10 w-12 h-12 rounded-full flex items-center justify-center text-2xl transition-all
+              ${hasPrev 
+                ? "bg-white/90 hover:bg-white shadow-lg text-zinc-700 hover:text-zinc-900 cursor-pointer" 
+                : "bg-zinc-200/50 text-zinc-400 cursor-not-allowed"
+              }`}
+            title="上一张 (←)"
+          >
+            ‹
+          </button>
+        )}
+
+        {/* 右侧导航按钮 */}
+        {totalCount > 1 && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onNext?.(); }}
+            disabled={!hasNext}
+            className={`absolute right-2 top-1/2 -translate-y-1/2 z-10 w-12 h-12 rounded-full flex items-center justify-center text-2xl transition-all
+              ${hasNext 
+                ? "bg-white/90 hover:bg-white shadow-lg text-zinc-700 hover:text-zinc-900 cursor-pointer" 
+                : "bg-zinc-200/50 text-zinc-400 cursor-not-allowed"
+              }`}
+            title="下一张 (→)"
+          >
+            ›
+          </button>
+        )}
+
         <div className="px-6 py-4 border-b border-zinc-100 flex items-center justify-between bg-white z-10">
           <div>
             <h3 className="text-lg font-bold text-zinc-900 flex items-center gap-2">
               <span>📷</span> 图片详情
+              {totalCount > 1 && (
+                <span className="text-sm font-normal text-zinc-500 ml-2">
+                  ({currentIndex + 1} / {totalCount})
+                </span>
+              )}
             </h3>
             <p className="text-sm text-zinc-500">
               {imageId} {position && <span className="bg-zinc-100 px-2 py-0.5 rounded text-xs ml-2">{position}</span>}
@@ -156,9 +210,43 @@ export function ImageModal({
             imageData={imageData}
             mimeType={mimeType}
             imageId={imageId}
-            className="max-w-full max-h-full object-contain !border-0 !rounded-none"
+            className="max-w-full max-h-full object-contain border-0! rounded-none!"
           />
         </div>
+
+        {/* 图片错误信息 */}
+        {details?.errorMessage && (
+          <div className={`px-6 py-3 border-t flex items-center gap-2 ${
+            details.errorType === 'blur' ? 'bg-red-50 border-red-100' :
+            details.errorType === 'duplicate' ? 'bg-amber-50 border-amber-100' :
+            details.errorType === 'objectDuplicate' ? 'bg-purple-50 border-purple-100' :
+            details.errorType === 'border' ? 'bg-rose-50 border-rose-100' :
+            details.errorType === 'seasonMismatch' ? 'bg-blue-50 border-blue-100' :
+            'bg-zinc-50 border-zinc-100'
+          }`}>
+            <span className="text-lg">⚠️</span>
+            <div className="flex-1">
+              <span className={`text-sm font-medium ${
+                details.errorType === 'blur' ? 'text-red-800' :
+                details.errorType === 'duplicate' ? 'text-amber-800' :
+                details.errorType === 'objectDuplicate' ? 'text-purple-800' :
+                details.errorType === 'border' ? 'text-rose-800' :
+                details.errorType === 'seasonMismatch' ? 'text-blue-800' :
+                'text-zinc-800'
+              }`}>
+                {details.errorMessage}
+              </span>
+              {details.seasonMismatchReason && (
+                <span className="text-xs text-blue-600 ml-2">({details.seasonMismatchReason})</span>
+              )}
+            </div>
+            {totalCount > 1 && (
+              <span className="text-xs text-zinc-500">
+                使用 ← → 键或点击按钮切换
+              </span>
+            )}
+          </div>
+        )}
 
         {details && (
           <div className="px-6 py-4 bg-white border-t border-zinc-100">

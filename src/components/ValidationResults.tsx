@@ -50,6 +50,8 @@ export function ValidationResults({
   const [previewImage, setPreviewImage] = useState<ImageValidationError | null>(
     null
   );
+  // 当前预览的索引（用于导航）
+  const [previewIndex, setPreviewIndex] = useState<number>(0);
   // 重复图片对比状态
   const [compareImage, setCompareImage] = useState<ImageValidationError | null>(
     null
@@ -458,7 +460,12 @@ export function ValidationResults({
                         )}
                         {err.imageData ? (
                           <button
-                            onClick={() => setPreviewImage(err)}
+                            onClick={() => {
+                              // 找到当前错误在排序后列表中的索引
+                              const idx = filteredAndSortedImageErrors.findIndex(e => e === err);
+                              setPreviewIndex(idx >= 0 ? idx : 0);
+                              setPreviewImage(err);
+                            }}
                             className="text-xs font-medium text-zinc-900 hover:text-blue-600 hover:underline cursor-pointer transition-colors"
                           >
                             查看
@@ -510,6 +517,28 @@ export function ValidationResults({
           message={previewImage.message}
           isOpen={!!previewImage}
           onClose={() => setPreviewImage(null)}
+          currentIndex={previewIndex}
+          totalCount={filteredAndSortedImageErrors.filter(e => e.imageData).length}
+          onPrev={() => {
+            // 找到上一个有图片数据的错误
+            for (let i = previewIndex - 1; i >= 0; i--) {
+              if (filteredAndSortedImageErrors[i]?.imageData) {
+                setPreviewIndex(i);
+                setPreviewImage(filteredAndSortedImageErrors[i]);
+                break;
+              }
+            }
+          }}
+          onNext={() => {
+            // 找到下一个有图片数据的错误
+            for (let i = previewIndex + 1; i < filteredAndSortedImageErrors.length; i++) {
+              if (filteredAndSortedImageErrors[i]?.imageData) {
+                setPreviewIndex(i);
+                setPreviewImage(filteredAndSortedImageErrors[i]);
+                break;
+              }
+            }
+          }}
           details={{
             row: previewImage.row,
             column: previewImage.column,
@@ -518,6 +547,9 @@ export function ValidationResults({
             isDuplicate: previewImage.errorType === "duplicate",
             suspicionScore: previewImage.details?.suspicionScore,
             suspicionLevel: previewImage.details?.suspicionLevel,
+            errorMessage: previewImage.message,
+            errorType: previewImage.errorType,
+            seasonMismatchReason: previewImage.details?.seasonMismatchReason,
           }}
         />
       )}

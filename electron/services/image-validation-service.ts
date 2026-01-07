@@ -9,6 +9,7 @@ interface WpsImage {
   buffer: Buffer;
   range: any; // 具体类型取决于 exceljs 或 wps-image-extractor
   positionDesc: string;
+  imageType?: string; // 图片类型，如 "门头"/"内部"/"图片" - 用于内部照片跳过季节检测
 }
 
 export class ImageValidationService {
@@ -30,10 +31,12 @@ export class ImageValidationService {
 
   /**
    * 执行图片批量验证（两阶段：顺序哈希 + 并行分析）
+   * @param enableModelCapabilities 是否启用模型能力（YOLO/CLIP季节检测等），默认true
    */
   async validateImages(
     images: WpsImage[],
-    onProgress?: (progress: number, message: string) => void
+    onProgress?: (progress: number, message: string) => void,
+    enableModelCapabilities?: boolean
   ): Promise<{
     results: Array<{ index: number; result: ImageValidationResult; thumbnail?: { data: string; mimeType: string } }>;
     stats: {
@@ -102,7 +105,10 @@ export class ImageValidationService {
             const result = await this.imageValidator.validateImageWithPrecomputedHash(
               image.buffer,
               i,
-              hashes[i]
+              hashes[i],
+              image.positionDesc,  // 传递位置信息
+              image.imageType,     // 传递图片类型，用于内部照片跳过季节检测
+              enableModelCapabilities  // 是否启用模型能力（季节检测等）
             );
 
             // 检测是否有问题（季节不符、边框等）
@@ -168,6 +174,7 @@ export class ImageValidationService {
     images: Array<{
       buffer: Buffer;
       positionDesc?: string;
+      imageType?: string;
     }>,
     onProgress?: (progress: number, message: string) => void
   ): Promise<ObjectDuplicateResult> {
@@ -202,6 +209,7 @@ export class ImageValidationService {
       const imagesForDetection = images.map(img => ({
         buffer: img.buffer,
         position: img.positionDesc,
+        imageType: img.imageType, // 传递图片类型
       }));
 
       // 执行检测

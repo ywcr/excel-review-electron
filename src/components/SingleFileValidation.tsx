@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from "react";
 import { useElectronValidation } from "../hooks/useElectronValidation";
+import { useValidationSettings } from "../hooks/useValidationSettings";
 import { ValidationResults } from "./ValidationResults";
 import { ValidationRequirements } from "./ValidationRequirements";
 import { GhostButton } from "./UI/Buttons";
@@ -18,6 +19,14 @@ export function SingleFileValidation({
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [selectedSheet, setSelectedSheet] = useState<string | undefined>(undefined);
   const [isDragging, setIsDragging] = useState(false);
+
+  // 使用共享的验证设置 Hook（支持持久化和跨组件同步）
+  const {
+    validateAllImages,
+    enableModelCapabilities,
+    setValidateAllImages,
+    setEnableModelCapabilities,
+  } = useValidationSettings();
 
   const {
     isValidating,
@@ -99,13 +108,13 @@ export function SingleFileValidation({
 
   const handleValidate = async () => {
     if (!selectedFile) return;
-    await validateExcel(selectedFile, selectedTask, selectedSheet);
+    await validateExcel(selectedFile, selectedTask, selectedSheet, validateAllImages, enableModelCapabilities);
   };
 
   const handleSheetSelect = async (sheetName: string) => {
     setSelectedSheet(sheetName);
     if (selectedFile) {
-      await validateExcel(selectedFile, selectedTask, sheetName);
+      await validateExcel(selectedFile, selectedTask, sheetName, validateAllImages, enableModelCapabilities);
     }
   };
 
@@ -156,6 +165,35 @@ export function SingleFileValidation({
               <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
             </div>
           </div>
+          
+          {/* 验证所有图片选项 */}
+          <label className="flex items-center gap-2 mt-4 cursor-pointer group">
+            <input
+              type="checkbox"
+              checked={validateAllImages}
+              onChange={(e) => setValidateAllImages(e.target.checked)}
+              disabled={isValidating}
+              className="w-4 h-4 rounded border-zinc-300 text-black focus:ring-black disabled:opacity-50"
+            />
+            <span className="text-sm text-zinc-600 group-hover:text-zinc-900 transition-colors">
+              验证所有工作表中的图片
+            </span>
+          </label>
+          
+          {/* 开启模型能力选项 */}
+          <label className="flex items-center gap-2 mt-3 cursor-pointer group">
+            <input
+              type="checkbox"
+              checked={enableModelCapabilities}
+              onChange={(e) => setEnableModelCapabilities(e.target.checked)}
+              disabled={isValidating}
+              className="w-4 h-4 rounded border-zinc-300 text-black focus:ring-black disabled:opacity-50"
+            />
+            <span className="text-sm text-zinc-600 group-hover:text-zinc-900 transition-colors">
+              开启模型能力
+              <span className="text-xs text-zinc-400 ml-1">(季节检测、物体重复检测)</span>
+            </span>
+          </label>
         </section>
 
         {/* 文件选择卡片 - 支持拖拽 */}

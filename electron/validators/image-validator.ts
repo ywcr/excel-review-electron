@@ -66,11 +66,15 @@ export class ImageValidator {
   /**
    * 执行季节检测（使用 YOLO + CLIP）
    * 提取公共逻辑，避免代码重复
+   * @param position 图片位置描述，如 "行5 列N"
+   * @param imageType 图片类型，如 "门头"/"内部"/"图片" - 用于判断是否跳过季节检测
    */
   private async performSeasonDetection(
     imageBuffer: Buffer,
     metadata: { width: number; height: number; format: string },
-    imageIndex: number
+    imageIndex: number,
+    position?: string,
+    imageType?: string
   ): Promise<{
     detectedSeason: Season;
     seasonMatchesCurrent: boolean;
@@ -91,6 +95,13 @@ export class ImageValidator {
       return defaultResult;
     }
 
+    // 检查是否为内部照片 - 内部照片跳过季节检测
+    // 使用 imageType 判断，支持不同任务类型的动态列配置
+    if (imageType === '内部') {
+      validationLogger.info(`[图片 #${imageIndex}] 跳过季节检测: 内部照片不需要季节判定`);
+      return defaultResult;
+    }
+
     // 预筛选：只对足够大的图片进行检测
     const shouldCheck = SeasonValidator.shouldCheckSeason(metadata);
     validationLogger.debug(`[图片 #${imageIndex}] 尺寸: ${metadata.width}x${metadata.height}, 预筛选: ${shouldCheck ? '通过' : '跳过'}`);
@@ -105,7 +116,8 @@ export class ImageValidator {
       const yoloDetector = getYoloDetector();
       const detections = await yoloDetector.detect(imageBuffer);
 
-      const hasPerson = detections.some(d => d.class === "person");
+      const personDetections = detections.filter(d => d.class === "person");
+      const hasPerson = personDetections.length > 0;
       const hasPlant = detections.some(d => d.class === "potted plant");
       
       // 输出检测到的类别（用于诊断）
@@ -120,26 +132,110 @@ export class ImageValidator {
         return defaultResult;
       }
 
-      // 2. 使用 CLIP 进行季节检测
+      // 2. 多人物融合检测：对多个人物分别检测，使用投票机制确定最终季节
       const clipDetector = getClipDetector();
-      validationLogger.debug(`[图片 #${imageIndex}] 开始 CLIP 季节检测...`);
-      const clipResult = await clipDetector.detect(imageBuffer, { hasPerson, hasPlant });
+      let finalClipResult: Awaited<ReturnType<typeof clipDetector.detect>> = null;
 
-      if (!clipResult) {
+      if (hasPerson) {
+        // 按面积排序，取最大的 3 个人物
+        const sortedPersons = [...personDetections].sort((a, b) => {
+          const areaA = a.bbox.width * a.bbox.height;
+          const areaB = b.bbox.width * b.bbox.height;
+          return areaB - areaA;
+        }).slice(0, 3);
+
+        if (sortedPersons.length === 1) {
+          // 单人：直接裁剪检测
+          const person = sortedPersons[0];
+          const areaRatio = (person.bbox.width * person.bbox.height) / (metadata.width * metadata.height) * 100;
+          
+          // 如果人物区域占比过小（< 1%），使用原图检测
+          // 这是因为过小的裁剪区域可能导致 CLIP 检测不准确
+          const MIN_CROP_AREA_RATIO = 1.0; // 最小裁剪面积占比 1%
+          
+          if (areaRatio < MIN_CROP_AREA_RATIO) {
+            validationLogger.info(`[图片 #${imageIndex}] 人物区域过小 (占比: ${areaRatio.toFixed(1)}% < ${MIN_CROP_AREA_RATIO}%)，使用原图检测`);
+            finalClipResult = await clipDetector.detect(imageBuffer, { hasPerson, hasPlant });
+          } else {
+            try {
+              const croppedBuffer = await yoloDetector.cropObject(imageBuffer, person, 0.15);
+              validationLogger.info(`[图片 #${imageIndex}] 已裁剪人物区域 (占比: ${areaRatio.toFixed(1)}%)`);
+              finalClipResult = await clipDetector.detect(croppedBuffer, { hasPerson, hasPlant });
+            } catch {
+              // 裁剪失败时使用原始图片
+              validationLogger.warn(`[图片 #${imageIndex}] 人物区域裁剪失败，使用原始图片`);
+              finalClipResult = await clipDetector.detect(imageBuffer, { hasPerson, hasPlant });
+            }
+          }
+        } else {
+          // 多人：分别检测后投票
+          validationLogger.info(`[图片 #${imageIndex}] 检测到 ${sortedPersons.length} 人，启用投票机制`);
+          const seasonVotes: Record<string, { count: number; totalScore: number }> = {};
+          
+          for (let i = 0; i < sortedPersons.length; i++) {
+            const person = sortedPersons[i];
+            try {
+              const croppedBuffer = await yoloDetector.cropObject(imageBuffer, person, 0.15);
+              const result = await clipDetector.detect(croppedBuffer, { hasPerson: true, hasPlant: false });
+              
+              if (result && result.detectedSeason !== "unknown") {
+                const season = result.detectedSeason;
+                if (!seasonVotes[season]) {
+                  seasonVotes[season] = { count: 0, totalScore: 0 };
+                }
+                seasonVotes[season].count += 1;
+                seasonVotes[season].totalScore += result.seasonConfidence;
+                validationLogger.debug(`[图片 #${imageIndex}] 人物 ${i + 1}: ${season} (${result.seasonConfidence.toFixed(1)}%)`);
+              }
+            } catch {
+              validationLogger.warn(`[图片 #${imageIndex}] 人物 ${i + 1} 裁剪失败，跳过`);
+            }
+          }
+
+          // 投票结果：选择票数最多的季节，票数相同时选择平均分数最高的
+          const sortedVotes = Object.entries(seasonVotes).sort((a, b) => {
+            if (b[1].count !== a[1].count) return b[1].count - a[1].count;
+            return (b[1].totalScore / b[1].count) - (a[1].totalScore / a[1].count);
+          });
+
+          if (sortedVotes.length > 0) {
+            const [winnerSeason, winnerData] = sortedVotes[0];
+            const avgConfidence = winnerData.totalScore / winnerData.count;
+            validationLogger.info(`[图片 #${imageIndex}] 投票结果: ${winnerSeason} (票数: ${winnerData.count}/${sortedPersons.length}, 平均置信度: ${avgConfidence.toFixed(1)}%)`);
+            
+            finalClipResult = {
+              detectedSeason: winnerSeason as Season,
+              seasonConfidence: avgConfidence,
+              clothingSeason: winnerSeason as Season,
+              hasPerson: true,
+              hasPlant,
+              rawScores: {},
+            };
+          } else {
+            // 所有投票都失败，使用原图检测
+            finalClipResult = await clipDetector.detect(imageBuffer, { hasPerson, hasPlant });
+          }
+        }
+      } else {
+        // 只有植物没有人物：使用原图检测
+        finalClipResult = await clipDetector.detect(imageBuffer, { hasPerson: false, hasPlant });
+      }
+
+      if (!finalClipResult) {
         validationLogger.warn(`[图片 #${imageIndex}] CLIP 检测返回 null（模型可能未初始化）`);
         return defaultResult;
       }
 
-      // 3. 验证季节是否符合当前月份
-      const seasonValidation = SeasonValidator.validate(clipResult);
+      // 4. 验证季节是否符合当前月份
+      const seasonValidation = SeasonValidator.validate(finalClipResult);
 
-      validationLogger.debug(`[图片 #${imageIndex}] 季节检测结果: ${clipResult.detectedSeason}, 匹配=${seasonValidation.matchesCurrent}`);
+      validationLogger.debug(`[图片 #${imageIndex}] 季节检测结果: ${finalClipResult.detectedSeason}, 匹配=${seasonValidation.matchesCurrent}`);
 
       return {
-        detectedSeason: clipResult.detectedSeason,
+        detectedSeason: finalClipResult.detectedSeason,
         seasonMatchesCurrent: seasonValidation.matchesCurrent,
         seasonMismatchReason: seasonValidation.mismatchReason,
-        seasonConfidence: clipResult.seasonConfidence,
+        seasonConfidence: finalClipResult.seasonConfidence,
       };
     } catch (error) {
       validationLogger.error(`[图片 #${imageIndex}] 季节检测失败:`, error);
@@ -245,7 +341,7 @@ export class ImageValidator {
     const borderResult = await this.imageProcessor.detectBorder(imageBuffer);
 
     // 6. 季节检测 - 使用提取的公共方法
-    const seasonResult = await this.performSeasonDetection(imageBuffer, metadata, imageIndex);
+    const seasonResult = await this.performSeasonDetection(imageBuffer, metadata, imageIndex, position);
 
     // 7. 构建并返回结果 - 使用提取的公共方法
     return this.buildValidationResult(
@@ -296,12 +392,18 @@ export class ImageValidator {
    * @param imageBuffer 图片 Buffer
    * @param imageIndex 图片索引
    * @param precomputedHash 已预计算的哈希
+   * @param position 图片位置描述，如 "行5 列M"
+   * @param imageType 图片类型，如 "门头"/"内部"/"图片" - 用于内部照片跳过季节检测
+   * @param enableModelCapabilities 是否启用模型能力（YOLO/CLIP季节检测等），默认true，为false时跳过季节检测
    * @returns 验证结果
    */
   async validateImageWithPrecomputedHash(
     imageBuffer: Buffer,
     imageIndex: number,
-    precomputedHash: string
+    precomputedHash: string,
+    position?: string,
+    imageType?: string,
+    enableModelCapabilities?: boolean
   ): Promise<ImageValidationResult> {
     // 1. 并行执行：元数据获取、模糊检测、边框检测
     const [metadata, blurScore, borderResult] = await Promise.all([
@@ -320,8 +422,20 @@ export class ImageValidator {
     // 3. 检测重复（使用预计算的哈希）
     const duplicateResult = this.checkDuplicate(precomputedHash, imageIndex);
 
-    // 4. 季节检测 - 使用提取的公共方法
-    const seasonResult = await this.performSeasonDetection(imageBuffer, metadata, imageIndex);
+    // 4. 季节检测 - 使用提取的公共方法，传递 position 和 imageType
+    // 如果 enableModelCapabilities 为 false，跳过季节检测
+    let seasonResult;
+    if (enableModelCapabilities === false) {
+      validationLogger.debug(`[图片 #${imageIndex}] 模型能力已关闭，跳过季节检测`);
+      seasonResult = {
+        detectedSeason: "unknown" as Season,
+        seasonMatchesCurrent: true,
+        seasonMismatchReason: undefined,
+        seasonConfidence: 0,
+      };
+    } else {
+      seasonResult = await this.performSeasonDetection(imageBuffer, metadata, imageIndex, position, imageType);
+    }
 
     // 5. 构建并返回结果 - 使用提取的公共方法
     return this.buildValidationResult(

@@ -22,17 +22,17 @@ import type { Season, ClipDetectionResult } from "../../shared/types/detection";
 // 这些 prompts 必须与 text-embeddings.json 中的 key 完全匹配！
 
 // 穿着季节检测 prompts（四季分类）
+// 注意：YOLO 已经检测了是否有人，所以不需要"无人"分类
+// v6 - 增强版本：进一步强化季节特征区分度
 const CLOTHING_PROMPTS = [
-  // 冬季：羽绒服、厚外套
-  "person in puffy down jacket or thick winter coat",
-  // 秋季：毛衣、风衣、薄外套
-  "person in sweater, cardigan, or light coat",
-  // 夏季：T恤、短裤、裙子
-  "person in t-shirt, shorts, or summer dress",
-  // 春季：薄夹克、轻便衣物
-  "person in thin jacket or light clothes",
-  // 无人
-  "no person in the image",
+  // 冬季：强调极度厚重、臃肿膨胀、明显羽绒服特征
+  "person wearing extremely bulky thick quilted puffy down parka jacket with visible padding, bundled up tightly for freezing cold winter snow weather",
+  // 秋季：强调中等厚度层叠穿着、毛衣外套组合
+  "person wearing layered autumn outfit with wool sweater under medium weight coat or cardigan in cool fall weather",
+  // 夏季：强调极度轻薄、裸露手臂、短袖
+  "person wearing minimal summer clothes with short sleeves, bare arms, tank top or thin t-shirt in hot sunny weather",
+  // 春季：强调单层轻便外套、薄风衣
+  "person wearing single layer light spring jacket or thin unpadded windbreaker in mild pleasant weather",
 ];
 
 // 穿着季节对应关系
@@ -41,7 +41,6 @@ const CLOTHING_SEASON_MAP: Record<number, Season> = {
   1: "autumn",  // 毛衣/风衣 → 秋季
   2: "summer",  // T恤/短裤 → 夏季
   3: "spring",  // 薄夹克 → 春季
-  // 4: no person - 不映射
 };
 
 // 植物/场景季节检测 prompts（四季分类）
@@ -63,6 +62,10 @@ const SCENERY_SEASON_MAP: Record<number, Season> = {
   2: "summer",
   3: "spring",
 };
+
+// 工装/制服检测 prompt（用于排除不反映季节的穿着）
+// 药店员工、保安、服务员等职业穿着不反映真实季节
+const UNIFORM_PROMPT = "person wearing work uniform, professional attire, staff clothing, or employee outfit";
 
 export class ClipDetector {
   private visualSession: OnnxRuntime.InferenceSession | null = null;
@@ -142,6 +145,7 @@ export class ClipDetector {
     const allPrompts = [
       ...CLOTHING_PROMPTS,
       ...SCENERY_PROMPTS,
+      UNIFORM_PROMPT,
     ];
 
     for (const prompt of allPrompts) {
@@ -258,46 +262,98 @@ export class ClipDetector {
 
     // ========== 1. 穿着季节检测（仅当有人时） ==========
     // 四季分类：冬季/秋季/夏季/春季
-    // 注意：YOLO 已确认 hasPerson=true，不再使用 CLIP 的"无人"分数进行二次验证
+    // 使用相对比例阈值替代绝对差距阈值，提高判定率
     let clothingSeason: Season | undefined;
     let maxClothingScore = 0;
-    const CLOTHING_CONFIDENCE_MARGIN = 0.015; // 1.5% - 最高分与次高分的差距阈值（降低以提高判定率）
-    const CLOTHING_MIN_CONFIDENCE = 0.18;     // 18% - 最低置信度要求（降低以提高判定率）
+    let clothingConfidenceLevel: 'high' | 'medium' | 'low' | 'uncertain' = 'uncertain';
+    
+    // 相对比例阈值（最高分/次高分的比例）
+    const CLOTHING_HIGH_RATIO = 1.12;     // 高置信度：高出 12%
+    const CLOTHING_MEDIUM_RATIO = 1.06;   // 中置信度：高出 6%（从 1.08 降低以提高判定率）
+    const CLOTHING_LOW_RATIO = 1.03;      // 低置信度：高出 3%（从 1.05 降低）
+    const CLOTHING_MIN_CONFIDENCE = 0.25; // 25% - 最低置信度要求
 
     if (hasPerson) {
-      // 四季穿着分数（不包含"无人"，因为 YOLO 已确认有人）
-      const clothingScores = [
-        { season: "winter" as Season, score: scores[CLOTHING_PROMPTS[0]] || 0, label: "冬季(羽绒服)" },
-        { season: "autumn" as Season, score: scores[CLOTHING_PROMPTS[1]] || 0, label: "秋季(毛衣)" },
-        { season: "summer" as Season, score: scores[CLOTHING_PROMPTS[2]] || 0, label: "夏季(T恤)" },
-        { season: "spring" as Season, score: scores[CLOTHING_PROMPTS[3]] || 0, label: "春季(薄夹克)" },
-      ];
+      // 先检查是否穿工装（工装不反映季节）
+      const uniformScore = scores[UNIFORM_PROMPT] || 0;
+      const UNIFORM_THRESHOLD = 0.26; // 工装检测阈值
+      
+      if (uniformScore >= UNIFORM_THRESHOLD) {
+        clipLogger.info(`检测到工装/制服 (分数: ${(uniformScore * 100).toFixed(1)}%)，跳过穿着季节判定`);
+        // 跳过穿着季节检测，clothingSeason 保持 undefined
+      } else {
+        // 四季穿着分数（YOLO 已确认有人，只比较四季）
+        const clothingScores = [
+          { season: "winter" as Season, score: scores[CLOTHING_PROMPTS[0]] || 0, label: "冬季(羽绒服)" },
+          { season: "autumn" as Season, score: scores[CLOTHING_PROMPTS[1]] || 0, label: "秋季(毛衣)" },
+          { season: "summer" as Season, score: scores[CLOTHING_PROMPTS[2]] || 0, label: "夏季(T恤)" },
+          { season: "spring" as Season, score: scores[CLOTHING_PROMPTS[3]] || 0, label: "春季(薄夹克)" },
+        ];
 
-      // 输出原始分数用于调试
-      clipLogger.info(`穿着季节分数: ${clothingScores.map(s => `${s.label}=${(s.score * 100).toFixed(1)}%`).join(" ")}`);
+        // 输出原始分数用于调试
+        clipLogger.info(`穿着季节分数: ${clothingScores.map(s => `${s.label}=${(s.score * 100).toFixed(1)}%`).join(" ")}`);
 
       // 按分数排序找出最高和次高
       const sortedScores = [...clothingScores].sort((a, b) => b.score - a.score);
       const topScore = sortedScores[0];
       const secondScore = sortedScores[1];
+      
+      // 计算比例（避免除零）
+      const ratio = secondScore.score > 0 ? topScore.score / secondScore.score : 999;
       const margin = topScore.score - secondScore.score;
 
-      // 需要同时满足：1) 差距足够大 2) 最高分数超过最低置信度
-      if (margin >= CLOTHING_CONFIDENCE_MARGIN && topScore.score >= CLOTHING_MIN_CONFIDENCE) {
-        clothingSeason = topScore.season;
-        maxClothingScore = topScore.score;
-        clipLogger.info(`穿着判定: ${topScore.label}, 置信度: ${(topScore.score * 100).toFixed(1)}%, 差距: ${(margin * 100).toFixed(1)}%`);
-      } else if (topScore.score < CLOTHING_MIN_CONFIDENCE) {
-        clipLogger.debug(`穿着季节不确定 (最高置信度: ${(topScore.score * 100).toFixed(1)}% < ${(CLOTHING_MIN_CONFIDENCE * 100).toFixed(0)}%)`);
+      // 使用相对比例判断置信度级别
+      if (topScore.score >= CLOTHING_MIN_CONFIDENCE) {
+        if (ratio >= CLOTHING_HIGH_RATIO) {
+          clothingSeason = topScore.season;
+          maxClothingScore = topScore.score;
+          clothingConfidenceLevel = 'high';
+          clipLogger.info(`穿着判定: ${topScore.label}, 置信度: ${(topScore.score * 100).toFixed(1)}%, 比例: ${ratio.toFixed(2)}x [高置信度]`);
+        } else if (ratio >= CLOTHING_MEDIUM_RATIO) {
+          clothingSeason = topScore.season;
+          maxClothingScore = topScore.score;
+          clothingConfidenceLevel = 'medium';
+          clipLogger.info(`穿着判定: ${topScore.label}, 置信度: ${(topScore.score * 100).toFixed(1)}%, 比例: ${ratio.toFixed(2)}x [中置信度]`);
+        } else if (ratio >= CLOTHING_LOW_RATIO) {
+          clothingSeason = topScore.season;
+          maxClothingScore = topScore.score;
+          clothingConfidenceLevel = 'low';
+          clipLogger.info(`穿着判定: ${topScore.label}, 置信度: ${(topScore.score * 100).toFixed(1)}%, 比例: ${ratio.toFixed(2)}x [低置信度]`);
+        } else {
+          // 分数差距很小，使用月份回退策略
+          const currentMonth = new Date().getMonth() + 1; // 1-12
+          const monthSeasonMap: Record<number, Season> = {
+            12: "winter", 1: "winter", 2: "winter",
+            3: "spring", 4: "spring", 5: "spring",
+            6: "summer", 7: "summer", 8: "summer",
+            9: "autumn", 10: "autumn", 11: "autumn",
+          };
+          const currentSeasonByMonth = monthSeasonMap[currentMonth];
+          
+          // 检查当前月份对应季节是否在前两名中
+          const topTwoSeasons = [topScore.season, secondScore.season];
+          if (topTwoSeasons.includes(currentSeasonByMonth) && ratio >= 1.01) {
+            // 当前月份对应季节在前两名中，使用回退策略
+            clothingSeason = currentSeasonByMonth;
+            maxClothingScore = topScore.season === currentSeasonByMonth ? topScore.score : secondScore.score;
+            clothingConfidenceLevel = 'low';
+            clipLogger.info(`穿着判定(月份回退): ${currentSeasonByMonth}, 置信度: ${(maxClothingScore * 100).toFixed(1)}%, 比例: ${ratio.toFixed(2)}x [月份回退]`);
+          } else {
+            clipLogger.debug(`穿着季节不确定 (比例: ${ratio.toFixed(2)}x < ${CLOTHING_LOW_RATIO}x, 差距: ${(margin * 100).toFixed(1)}%)`);
+          }
+        }
       } else {
-        clipLogger.debug(`穿着季节不确定 (差距: ${(margin * 100).toFixed(1)}% < ${(CLOTHING_CONFIDENCE_MARGIN * 100).toFixed(1)}%)`);
+        clipLogger.debug(`穿着季节不确定 (最高置信度: ${(topScore.score * 100).toFixed(1)}% < ${(CLOTHING_MIN_CONFIDENCE * 100).toFixed(0)}%)`);
+      }
       }
     }
 
     // ========== 2. 植物/场景季节检测（仅当有植物时） ==========
     let scenerySeason: Season | undefined;
     let maxSceneryScore = 0;
-    const SCENERY_CONFIDENCE_MARGIN = 0.02; // 2% - 降低阈值以提高检测灵敏度
+    
+    // 场景季节也使用相对比例阈值
+    const SCENERY_RATIO_THRESHOLD = 1.06; // 高出 6%
 
     // 室内商业场所的 prompt（用于判断是否跳过场景季节检测）
     const INDOOR_SHOP_PROMPT = "indoor shop, store, pharmacy, supermarket, or retail space with product shelves and merchandise";
@@ -330,23 +386,51 @@ export class ClipDetector {
 
         const sortedScores = [...sceneryScores].sort((a, b) => b.score - a.score);
         maxSceneryScore = sortedScores[0].score;
-        const margin = maxSceneryScore - sortedScores[1].score;
+        const sceneryRatio = sortedScores[1].score > 0 ? sortedScores[0].score / sortedScores[1].score : 999;
 
-        if (margin >= SCENERY_CONFIDENCE_MARGIN) {
+        if (sceneryRatio >= SCENERY_RATIO_THRESHOLD) {
           scenerySeason = sortedScores[0].season;
-          clipLogger.debug(`场景季节: ${scenerySeason} (分数: ${(maxSceneryScore * 100).toFixed(1)}%, 差距: ${(margin * 100).toFixed(1)}%)`);
+          clipLogger.debug(`场景季节: ${scenerySeason} (分数: ${(maxSceneryScore * 100).toFixed(1)}%, 比例: ${sceneryRatio.toFixed(2)}x)`);
         } else {
-          clipLogger.debug(`场景季节不确定 (差距: ${(margin * 100).toFixed(1)}% < 2%)`);
+          clipLogger.debug(`场景季节不确定 (比例: ${sceneryRatio.toFixed(2)}x < ${SCENERY_RATIO_THRESHOLD}x)`);
         }
       }
     }
 
     // ========== 3. 综合季节判断 ==========
     // 优先使用穿着季节（更可靠），其次使用场景季节
+    // 新增：穿着与场景一致性校验
     let detectedSeason: Season = "unknown";
     let seasonConfidence = 0;
 
-    if (clothingSeason) {
+    // 定义季节冲突检测（温度差异大的季节组合）
+    const isSeasonConflict = (s1: Season, s2: Season): boolean => {
+      const conflictPairs: [Season, Season][] = [
+        ["winter", "summer"],
+        ["summer", "winter"],
+      ];
+      return conflictPairs.some(([a, b]) => (s1 === a && s2 === b));
+    };
+
+    if (clothingSeason && scenerySeason) {
+      // 两者都有结果时，检查一致性
+      if (clothingSeason === scenerySeason) {
+        // 完全一致：高置信度
+        detectedSeason = clothingSeason;
+        seasonConfidence = Math.max(maxClothingScore, maxSceneryScore) * 100;
+        clipLogger.info(`穿着与场景一致: ${detectedSeason}`);
+      } else if (isSeasonConflict(clothingSeason, scenerySeason)) {
+        // 严重冲突（冬夏）：优先穿着，但降低置信度
+        detectedSeason = clothingSeason;
+        seasonConfidence = maxClothingScore * 100 * 0.7; // 降低 30%
+        clipLogger.warn(`穿着(${clothingSeason})与场景(${scenerySeason})冲突，采用穿着季节但降低置信度`);
+      } else {
+        // 轻微不一致（如春秋）：仍优先穿着
+        detectedSeason = clothingSeason;
+        seasonConfidence = maxClothingScore * 100 * 0.9; // 轻微降低
+        clipLogger.debug(`穿着(${clothingSeason})与场景(${scenerySeason})不完全一致`);
+      }
+    } else if (clothingSeason) {
       detectedSeason = clothingSeason;
       seasonConfidence = maxClothingScore * 100;
     } else if (scenerySeason) {

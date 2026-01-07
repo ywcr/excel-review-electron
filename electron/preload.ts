@@ -10,13 +10,16 @@ const electronAPI = {
   // 选择多个文件（批量验证用）
   selectMultipleFiles: () => ipcRenderer.invoke("select-multiple-files"),
 
+  // 选择文件夹
+  selectFolder: () => ipcRenderer.invoke("select-folder"),
+
   // 获取 Excel 文件的工作表列表
   getExcelSheets: (filePath: string) =>
     ipcRenderer.invoke("get-excel-sheets", filePath),
 
   // 验证 Excel
-  validateExcel: (filePath: string, taskName: string, sheetName?: string) =>
-    ipcRenderer.invoke("validate-excel", filePath, taskName, sheetName),
+  validateExcel: (filePath: string, taskName: string, sheetName?: string, validateAllImages?: boolean, enableModelCapabilities?: boolean) =>
+    ipcRenderer.invoke("validate-excel", filePath, taskName, sheetName, validateAllImages, enableModelCapabilities),
 
   // 取消验证
   cancelValidation: () => ipcRenderer.invoke("cancel-validation"),
@@ -46,6 +49,19 @@ const electronAPI = {
 
   // 清空历史记录
   clearHistory: () => ipcRenderer.invoke("clear-history"),
+
+  // ========== 文件夹图片对比 API ==========
+  // 扫描文件夹图片
+  scanFolderImages: (folderPath: string) =>
+    ipcRenderer.invoke("scan-folder-images", folderPath),
+
+  // 对比两个文件夹
+  compareFolders: (libraryPath: string, newImagesPath: string) =>
+    ipcRenderer.invoke("compare-folders", libraryPath, newImagesPath),
+
+  // 获取图片缩略图
+  getImageThumbnail: (imagePath: string) =>
+    ipcRenderer.invoke("get-image-thumbnail", imagePath),
 
   // 监听进度更新
   onProgress: (

@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import { ValidationResults } from "./ValidationResults";
 import { ValidationRequirements } from "./ValidationRequirements";
+import { useValidationSettings } from "../hooks/useValidationSettings";
 import { GhostButton, OutlineButton } from "./UI/Buttons";
 import { AddTaskModal } from "./UI/AddTaskModal";
 import { 
@@ -56,6 +57,14 @@ export function BatchValidation({
   const [isDragging, setIsDragging] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const dragCounter = useRef(0);
+
+  // 使用共享的验证设置 Hook（与单文件验证同步）
+  const {
+    validateAllImages,
+    enableModelCapabilities,
+    setValidateAllImages,
+    setEnableModelCapabilities,
+  } = useValidationSettings();
 
   // 处理添加文件的通用函数
   const addFiles = useCallback((filePaths: string[]) => {
@@ -197,7 +206,9 @@ export function BatchValidation({
         const result = await window.electron.validateExcel(
           task.filePath,
           task.taskType,
-          task.sheetName
+          task.sheetName,
+          validateAllImages,
+          enableModelCapabilities
         );
 
         window.electron.removeProgressListener?.();
@@ -368,6 +379,44 @@ export function BatchValidation({
             })}
           </div>
         )}
+      </section>
+
+      {/* ===== 验证选项 ===== */}
+      <section className="bg-white border border-zinc-200 rounded-lg p-4">
+        <h3 className="text-sm font-bold text-zinc-900 flex items-center gap-2 mb-3">
+          <span className="w-1 h-4 bg-black rounded-full"></span>
+          验证选项
+        </h3>
+        <div className="flex flex-wrap gap-6">
+          {/* 验证所有图片选项 */}
+          <label className="flex items-center gap-2 cursor-pointer group">
+            <input
+              type="checkbox"
+              checked={validateAllImages}
+              onChange={(e) => setValidateAllImages(e.target.checked)}
+              disabled={isValidating}
+              className="w-4 h-4 rounded border-zinc-300 text-black focus:ring-black disabled:opacity-50"
+            />
+            <span className="text-sm text-zinc-600 group-hover:text-zinc-900 transition-colors">
+              验证所有工作表中的图片
+            </span>
+          </label>
+          
+          {/* 开启模型能力选项 */}
+          <label className="flex items-center gap-2 cursor-pointer group">
+            <input
+              type="checkbox"
+              checked={enableModelCapabilities}
+              onChange={(e) => setEnableModelCapabilities(e.target.checked)}
+              disabled={isValidating}
+              className="w-4 h-4 rounded border-zinc-300 text-black focus:ring-black disabled:opacity-50"
+            />
+            <span className="text-sm text-zinc-600 group-hover:text-zinc-900 transition-colors">
+              开启模型能力
+              <span className="text-xs text-zinc-400 ml-1">(季节检测、物体重复检测)</span>
+            </span>
+          </label>
+        </div>
       </section>
 
       {/* ===== 第二步：任务列表 ===== */}

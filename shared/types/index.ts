@@ -142,11 +142,14 @@ declare global {
       getPathForFile: (file: File) => string;
       selectFile: () => Promise<string | null>;
       selectMultipleFiles: () => Promise<string[]>;
+      selectFolder: () => Promise<string | null>;
       getExcelSheets: (filePath: string) => Promise<{ sheets: string[]; error?: string }>;
       validateExcel: (
         filePath: string,
         taskName: string,
-        sheetName?: string
+        sheetName?: string,
+        validateAllImages?: boolean,
+        enableModelCapabilities?: boolean
       ) => Promise<ValidationResult>;
       cancelValidation: () => Promise<boolean>;
       exportValidationResult: (
@@ -175,6 +178,33 @@ declare global {
       getHistoryDetail: (id: string) => Promise<ValidationResult | null>;
       deleteHistory: (id: string) => Promise<boolean>;
       clearHistory: () => Promise<boolean>;
+      // 文件夹图片对比 API
+      scanFolderImages: (folderPath: string) => Promise<{
+        success: boolean;
+        data?: { folderPath: string; imageCount: number };
+        error?: string;
+      }>;
+      compareFolders: (libraryPath: string, newImagesPath: string) => Promise<{
+        success: boolean;
+        data?: {
+          totalNewImages: number;
+          totalLibraryImages: number;
+          duplicates: Array<{
+            newImage: { path: string; name: string };
+            libraryImage: { path: string; name: string };
+            similarity: number;
+            hammingDistance: number;
+          }>;
+          uniqueCount: number;
+          durationMs: number;
+        };
+        error?: string;
+      }>;
+      getImageThumbnail: (imagePath: string) => Promise<{
+        success: boolean;
+        data?: string;
+        error?: string;
+      }>;
       onProgress: (callback: (data: ValidationProgress) => void) => void;
       removeProgressListener: () => void;
     };

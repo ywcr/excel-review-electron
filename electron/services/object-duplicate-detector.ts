@@ -10,6 +10,7 @@
 
 import { getYoloDetector } from "./yolo-detector";
 import { getClipDetector } from "./clip-detector";
+import { getReidDetector } from "./reid-detector";
 import { duplicateLogger } from "../utils/logger";
 import type { 
   DetectedObject,
@@ -25,25 +26,26 @@ export const OBJECT_DUPLICATE_CONFIG = {
   /** 默认相似度阈值：超过此值判定为同一物体 */
   SIMILARITY_THRESHOLD: 0.90,
   
-  /** 不同物体类型的相似度阈值（CLIP对某些类别不可靠） */
+  /** 不同物体类型的相似度阈值 */
   CLASS_SIMILARITY_THRESHOLDS: {
-    // 排除人物检测 - CLIP无法区分不同的人，只能检测"有人"
-    // person: 排除
+    // 人物使用 ReID 模型，阈值需要较高以避免误判
+    // 注意：相似衣着的不同人可能有 70-85% 相似度，需要 90% 以上才判定为重复
+    person: 0.90,
     
     // 车辆类 - 需要高阈值，相同颜色车辆容易误报
-    car: 0.95,
-    truck: 0.95,
-    bus: 0.95,
+    car: 0.92,
+    truck: 0.92,
+    bus: 0.92,
     
     // 两轮车 - 需要高阈值
-    motorcycle: 0.92,
-    bicycle: 0.92,
+    motorcycle: 0.88,
+    bicycle: 0.88,
     
     // 其他物品 - 默认阈值
   } as Record<string, number>,
   
-  /** 排除的物体类别（CLIP无法可靠区分） */
-  EXCLUDED_CLASSES: ['person'],
+  /** 排除的物体类别（现已移除 person，使用 ReID 检测） */
+  EXCLUDED_CLASSES: [] as string[],
   
   /** 最小物体面积比例（相对于图片总面积）：低于此值的物体忽略 */
   MIN_OBJECT_AREA_RATIO: 0.01, // 1%
@@ -76,7 +78,9 @@ interface ImageObjects {
 export class ObjectDuplicateDetector {
   private yoloDetector = getYoloDetector();
   private clipDetector = getClipDetector();
+  private reidDetector = getReidDetector();
   private isInitialized = false;
+  private reidAvailable = false;
 
   /**
    * 初始化检测器
@@ -90,6 +94,14 @@ export class ObjectDuplicateDetector {
       if (!clipReady) {
         duplicateLogger.warn("CLIP 检测器初始化失败，物体重复检测功能受限");
         return false;
+      }
+      
+      // 尝试初始化 ReID 检测器（可选，用于人物重复检测）
+      this.reidAvailable = await this.reidDetector.initialize();
+      if (this.reidAvailable) {
+        duplicateLogger.success("ReID 检测器初始化成功，人物重复检测已启用");
+      } else {
+        duplicateLogger.warn("ReID 检测器初始化失败，人物重复检测使用 CLIP 降级模式");
       }
       
       this.isInitialized = true;
@@ -364,7 +376,7 @@ export class ObjectDuplicateDetector {
         .slice(0, OBJECT_DUPLICATE_CONFIG.MAX_OBJECTS_PER_IMAGE);
     }
 
-    // 3. 对每个物体提取 CLIP 特征
+    // 3. 对每个物体提取特征（person 使用 ReID，其他使用 CLIP）
     const features: ObjectFeature[] = [];
     
     for (const obj of filteredObjects) {
@@ -372,8 +384,19 @@ export class ObjectDuplicateDetector {
         // 裁剪物体区域
         const croppedBuffer = await this.yoloDetector.cropObject(imageBuffer, obj, 0.1);
         
-        // 获取 CLIP 嵌入
-        const embedding = await this.clipDetector.getImageEmbedding(croppedBuffer);
+        let embedding: Float32Array | null = null;
+        
+        if (obj.class === 'person' && this.reidAvailable) {
+          // 人物使用 ReID 模型
+          embedding = await this.reidDetector.getPersonEmbedding(croppedBuffer);
+          if (embedding) {
+            duplicateLogger.debug(`[ReID] 提取人物特征成功 (图${imageIndex + 1})`);
+          }
+        } else {
+          // 其他物体使用 CLIP
+          embedding = await this.clipDetector.getImageEmbedding(croppedBuffer);
+        }
+        
         if (embedding) {
           features.push({
             imageIndex,

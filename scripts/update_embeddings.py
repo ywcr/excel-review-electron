@@ -33,12 +33,14 @@ new_texts = [
     "urban city street scene with buildings, roads, sidewalks, and no trees or plants visible",
     "outdoor natural scene with trees, plants, grass, flowers, or green vegetation",
     "other scene or mixed environment",
-    # 简化版穿着季节 prompts (v4 - 最终版)
-    "person in puffy down jacket or thick winter coat",
-    "person in sweater, cardigan, or light coat",
-    "person in t-shirt, shorts, or summer dress",
-    "person in thin jacket or light clothes",
+    # 穿着季节 prompts (v6 - 增强版本：进一步强化季节特征区分度)
+    "person wearing extremely bulky thick quilted puffy down parka jacket with visible padding, bundled up tightly for freezing cold winter snow weather",
+    "person wearing layered autumn outfit with wool sweater under medium weight coat or cardigan in cool fall weather",
+    "person wearing minimal summer clothes with short sleeves, bare arms, tank top or thin t-shirt in hot sunny weather",
+    "person wearing single layer light spring jacket or thin unpadded windbreaker in mild pleasant weather",
     "no person in the image",
+    # 工装/制服检测 prompt（用于排除不反映季节的穿着）
+    "person wearing work uniform, professional attire, staff clothing, or employee outfit",
 ]
 
 # 需要删除的旧提示词
@@ -55,6 +57,16 @@ old_texts_to_remove = [
     "person wearing very thick puffy inflated down jacket, oversized bulky puffer coat with visible quilted padding, heavy winter outerwear",
     "person wearing thin fitted jacket, light unpadded windbreaker, slim casual clothes, no thick puffy outerwear",
     "no person visible in the image",
+    # v4 旧版 prompts (需要删除)
+    "person in puffy down jacket or thick winter coat",
+    "person in sweater, cardigan, or light coat",
+    "person in t-shirt, shorts, or summer dress",
+    "person in thin jacket or light clothes",
+    # v5 旧版 prompts (需要删除)
+    "person wearing very thick heavy puffy down jacket bundled up for freezing cold winter weather",
+    "person wearing wool sweater or medium weight jacket in cool autumn weather with layered outfit",
+    "person wearing short sleeve t-shirt or tank top with bare arms in hot summer weather",
+    "person wearing light spring cardigan or thin windbreaker in mild pleasant weather",
 ]
 
 # 加载现有的嵌入

@@ -26,11 +26,13 @@ export class ExcelStreamProcessor {
     filePath: string,
     taskName: string,
     sheetName?: string,
-    onProgress?: (progress: number, message: string) => void
+    onProgress?: (progress: number, message: string) => void,
+    validateAllImages?: boolean,
+    enableModelCapabilities?: boolean
   ): Promise<ValidationResult> {
     this.isCancelled = false;
 
-    console.log("🚀 [验证开始]", { filePath, taskName, sheetName });
+    console.log("🚀 [验证开始]", { filePath, taskName, sheetName, validateAllImages, enableModelCapabilities });
     onProgress?.(0, "[1/6] 正在打开文件...");
 
     const template = TASK_TEMPLATES[taskName];
@@ -296,11 +298,14 @@ export class ExcelStreamProcessor {
 
     const imageValidationStartTime = Date.now();
     try {
-      console.log("🖼️ [图片验证] 开始调用 validateImages...");
+      console.log("🖼️ [图片验证] 开始调用 validateImages...", { validateAllImages, enableModelCapabilities });
+      // 如果验证所有图片，则不传入工作表名以提取所有工作表的图片
+      const imageSheetFilter = validateAllImages ? undefined : targetWorksheet;
       const imageResults = await this.validateImages(
         filePath,
-        targetWorksheet,
-        onProgress
+        imageSheetFilter,
+        onProgress,
+        enableModelCapabilities
       );
 
       const imageValidationDuration = Date.now() - imageValidationStartTime;
@@ -322,8 +327,9 @@ export class ExcelStreamProcessor {
 
       // 物体重复检测（检测人物、车辆、物品等可移动物体的重复）
       // 复用图片验证阶段已提取的图片数据，避免二次读取
+      // 仅当模型能力开启时执行
       const extractedImages = imageResults.extractedImages;
-      if (!imageValidationSkipped && extractedImages && extractedImages.length >= 2) {
+      if (enableModelCapabilities !== false && !imageValidationSkipped && extractedImages && extractedImages.length >= 2) {
         try {
           onProgress?.(90, "[5.5/6] 正在检测物体重复...");
           console.log("🎯 [物体重复检测] 开始检测可移动物体（人物/车辆/物品）重复... (复用已提取的图片数据)");
@@ -406,6 +412,9 @@ export class ExcelStreamProcessor {
                 // 找到实际的全局索引
                 const img1 = groupImages[dup.image1Index];
                 const img2 = groupImages[dup.image2Index];
+
+                // 输出重复检测详细日志
+                console.log(`⚠️ [物体重复] 检测到重复 ${dup.objectClassCN}: ${img1.position} ↔ ${img2.position} (相似度: ${(dup.similarity * 100).toFixed(0)}%) [${storeName}]`);
 
                 let image1Data: string | undefined;
                 let image2Data: string | undefined;
@@ -525,13 +534,11 @@ export class ExcelStreamProcessor {
   /**
    * 验证工作表中的所有图片
    */
-  /**
-   * 验证工作表中的所有图片
-   */
   private async validateImages(
     filePath: string,
-    sheetName: string,
-    onProgress?: (progress: number, message: string) => void
+    sheetName?: string,
+    onProgress?: (progress: number, message: string) => void,
+    enableModelCapabilities?: boolean
   ): Promise<{
     errors: ImageValidationError[];
     stats: {
@@ -578,6 +585,7 @@ export class ExcelStreamProcessor {
         positionDesc: string;
         row: number;
         column: string;
+        type: string;
         index: number;
       }> = [];
 
@@ -591,6 +599,7 @@ export class ExcelStreamProcessor {
           positionDesc: img.position,
           row: img.row,
           column: img.column,
+          type: img.type,  // 传递图片类型（门头/内部）
           index: i,
         }));
       } else {
@@ -622,12 +631,14 @@ export class ExcelStreamProcessor {
         buffer: img.buffer,
         range: null,
         positionDesc: img.positionDesc,
+        imageType: img.type,  // 传递图片类型用于内部照片跳过季节检测
       }));
 
       const { results, stats: serviceStats } =
         await this.imageValidationService.validateImages(
           serviceInput,
-          onProgress
+          onProgress,
+          enableModelCapabilities
         );
 
       // 合并统计数据

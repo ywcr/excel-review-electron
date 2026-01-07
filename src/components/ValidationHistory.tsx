@@ -222,18 +222,6 @@ export function ValidationHistory({ onSelect }: { onSelect?: (record: HistoryRec
                          </div>
                        )}
                        
-                       {/* Re-validate Button */}
-                       <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSelect?.(record);
-                        }}
-                        className="p-2 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
-                        title="重新验证"
-                      >
-                        <PlayIcon size={16} />
-                      </button>
-
                       {/* Delete Button */}
                       <button
                         onClick={(e) => handleDelete(e, record.id)}

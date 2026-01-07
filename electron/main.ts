@@ -4,6 +4,7 @@ import ExcelJS from "exceljs";
 import { ExcelStreamProcessor } from "./services/excel-processor";
 import { ExcelComparer } from "./services/excel-comparer";
 import { historyStore } from "./services/history-store";
+import { getFolderDuplicateDetector } from "./services/folder-duplicate-detector";
 import type { ValidationResult } from "../shared/types";
 
 let mainWindow: BrowserWindow | null = null;
@@ -95,13 +96,15 @@ function registerIpcHandlers() {
   // 验证 Excel
   ipcMain.handle(
     "validate-excel",
-    async (event, filePath: string, taskName: string, sheetName?: string) => {
+    async (event, filePath: string, taskName: string, sheetName?: string, validateAllImages?: boolean, enableModelCapabilities?: boolean) => {
       console.log("\n" + "=".repeat(60));
       console.log("🚀 [IPC] validate-excel 请求开始");
       console.log("=".repeat(60));
       console.log("📁 文件路径:", filePath);
       console.log("📋 任务类型:", taskName);
       console.log("📄 工作表:", sheetName || "(自动检测)");
+      console.log("🖼️ 验证所有图片:", validateAllImages ? "是" : "否");
+      console.log("🤖 模型能力:", enableModelCapabilities !== false ? "开启" : "关闭");
       console.log("⏰ 时间:", new Date().toISOString());
       console.log("-".repeat(60));
 
@@ -121,7 +124,9 @@ function registerIpcHandlers() {
           filePath,
           taskName,
           sheetName,
-          progressCallback
+          progressCallback,
+          validateAllImages,
+          enableModelCapabilities
         );
         
         const duration = Date.now() - startTime;
@@ -408,4 +413,93 @@ function registerIpcHandlers() {
       }
     }
   );
+
+  // ========== 文件夹图片对比 IPC ==========
+  
+  // 选择文件夹
+  ipcMain.handle("select-folder", async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openDirectory"],
+    });
+
+    if (result.canceled) {
+      return null;
+    }
+
+    return result.filePaths[0];
+  });
+
+  // 扫描文件夹图片
+  ipcMain.handle("scan-folder-images", async (_event, folderPath: string) => {
+    try {
+      const detector = getFolderDuplicateDetector();
+      const result = await detector.scanFolder(folderPath);
+      return {
+        success: true,
+        data: {
+          folderPath: result.folderPath,
+          imageCount: result.imageCount,
+        },
+      };
+    } catch (error) {
+      console.error("扫描文件夹错误:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+
+  // 对比两个文件夹
+  ipcMain.handle(
+    "compare-folders",
+    async (event, libraryPath: string, newImagesPath: string) => {
+      try {
+        const detector = getFolderDuplicateDetector();
+
+        // 发送进度更新
+        const progressCallback = (current: number, total: number, message: string) => {
+          event.sender.send("validation-progress", {
+            progress: current,
+            message,
+          });
+        };
+
+        const result = await detector.compareFolders(
+          libraryPath,
+          newImagesPath,
+          progressCallback
+        );
+
+        return {
+          success: true,
+          data: result,
+        };
+      } catch (error) {
+        console.error("对比文件夹错误:", error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
+  );
+
+  // 获取图片缩略图
+  ipcMain.handle("get-image-thumbnail", async (_event, imagePath: string) => {
+    try {
+      const detector = getFolderDuplicateDetector();
+      const thumbnail = await detector.generateThumbnail(imagePath);
+      return {
+        success: true,
+        data: thumbnail,
+      };
+    } catch (error) {
+      console.error("生成缩略图错误:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
 }
