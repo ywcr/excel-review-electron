@@ -24,23 +24,27 @@ import type {
 /** 物体重复检测配置 */
 export const OBJECT_DUPLICATE_CONFIG = {
   /** 默认相似度阈值：超过此值判定为同一物体 */
-  SIMILARITY_THRESHOLD: 0.90,
-  
+  SIMILARITY_THRESHOLD: 0.85, // 降低以检测更多重复
+
   /** 不同物体类型的相似度阈值 */
   CLASS_SIMILARITY_THRESHOLDS: {
-    // 人物使用 ReID 模型，阈值需要较高以避免误判
-    // 注意：相似衣着的不同人可能有 70-85% 相似度，需要 90% 以上才判定为重复
-    person: 0.90,
-    
+    // 人物使用 ReID 模型
+    // 相似衣着的人可能有 70-85% 相似度，但需要检测同一人
+    person: 0.85, // 降低以检测穿着相同的同一人
+
     // 车辆类 - 需要高阈值，相同颜色车辆容易误报
-    car: 0.92,
-    truck: 0.92,
-    bus: 0.92,
-    
+    car: 0.88,
+    truck: 0.88,
+    bus: 0.88,
+
     // 两轮车 - 需要高阈值
-    motorcycle: 0.88,
-    bicycle: 0.88,
-    
+    motorcycle: 0.85,
+    bicycle: 0.85,
+
+    // 椅子/凳子类 - 降低以检测小凳子
+    chair: 0.80,
+    bench: 0.80,
+
     // 其他物品 - 默认阈值
   } as Record<string, number>,
   
@@ -48,7 +52,7 @@ export const OBJECT_DUPLICATE_CONFIG = {
   EXCLUDED_CLASSES: [] as string[],
   
   /** 最小物体面积比例（相对于图片总面积）：低于此值的物体忽略 */
-  MIN_OBJECT_AREA_RATIO: 0.01, // 1%
+  MIN_OBJECT_AREA_RATIO: 0.002, // 0.2% (更低以检测小物体)
   
   /** 最大物体面积比例：超过此值的物体可能是背景，忽略 */
   MAX_OBJECT_AREA_RATIO: 0.8, // 80%
@@ -358,6 +362,12 @@ export class ObjectDuplicateDetector {
     const allDetections = await this.yoloDetector.detect(imageBuffer);
     const movableObjects = this.yoloDetector.getMovableObjects(allDetections);
 
+    // 📋 诊断日志：输出 YOLO 检测到的所有可移动物体
+    if (movableObjects.length > 0) {
+      const objList = movableObjects.map(o => `${o.classNameCN}(${(o.confidence * 100).toFixed(0)}%)`).join(", ");
+      duplicateLogger.debug(`[图${imageIndex + 1}] YOLO检测到: ${objList}`);
+    }
+
     // 2. 过滤太小或太大的物体
     const metadata = await require("sharp")(imageBuffer).metadata();
     const imageArea = (metadata.width || 640) * (metadata.height || 640);
@@ -365,9 +375,23 @@ export class ObjectDuplicateDetector {
     let filteredObjects = movableObjects.filter(obj => {
       const objArea = obj.bbox.width * obj.bbox.height;
       const ratio = objArea / imageArea;
-      return ratio >= OBJECT_DUPLICATE_CONFIG.MIN_OBJECT_AREA_RATIO 
+      const pass = ratio >= OBJECT_DUPLICATE_CONFIG.MIN_OBJECT_AREA_RATIO 
           && ratio <= OBJECT_DUPLICATE_CONFIG.MAX_OBJECT_AREA_RATIO;
+      
+      // 📋 诊断日志：输出被过滤掉的物体
+      if (!pass) {
+        duplicateLogger.debug(`[图${imageIndex + 1}] ⚠️ ${obj.classNameCN}被过滤: 面积比=${(ratio * 100).toFixed(2)}% (阈值: ${OBJECT_DUPLICATE_CONFIG.MIN_OBJECT_AREA_RATIO * 100}%-${OBJECT_DUPLICATE_CONFIG.MAX_OBJECT_AREA_RATIO * 100}%)`);
+      }
+      return pass;
     });
+
+    // 📋 诊断日志：输出过滤后保留的物体
+    if (filteredObjects.length > 0) {
+      const objList = filteredObjects.map(o => o.classNameCN).join(", ");
+      duplicateLogger.debug(`[图${imageIndex + 1}] 过滤后保留: ${objList}`);
+    } else if (movableObjects.length > 0) {
+      duplicateLogger.debug(`[图${imageIndex + 1}] 所有物体都被面积过滤掉了`);
+    }
 
     // 限制每张图片的物体数量，优先保留置信度高的
     if (filteredObjects.length > OBJECT_DUPLICATE_CONFIG.MAX_OBJECTS_PER_IMAGE) {

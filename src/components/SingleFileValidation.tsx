@@ -1,10 +1,15 @@
 import { useState, useCallback, useRef } from "react";
-import { useElectronValidation } from "../hooks/useElectronValidation";
+import { useValidation } from "../contexts/ValidationContext";
 import { useValidationSettings } from "../hooks/useValidationSettings";
 import { ValidationResults } from "./ValidationResults";
 import { ValidationRequirements } from "./ValidationRequirements";
 import { GhostButton } from "./UI/Buttons";
 import { SheetSelectionModal } from "./UI/SheetSelectionModal";
+
+// 需要选择品牌的任务类型
+const BRAND_REQUIRED_TASKS = ["消费者调研", "患者调研"];
+// 可用品牌列表
+const AVAILABLE_BRANDS = ["西黄丸", "通络祛痛膏"];
 
 interface SingleFileValidationProps {
   availableTasks: string[];
@@ -18,7 +23,11 @@ export function SingleFileValidation({
   const [selectedTask, setSelectedTask] = useState(defaultTask);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [selectedSheet, setSelectedSheet] = useState<string | undefined>(undefined);
+  const [selectedBrand, setSelectedBrand] = useState<string>(AVAILABLE_BRANDS[0]);
   const [isDragging, setIsDragging] = useState(false);
+
+  // 是否需要显示品牌选择
+  const needsBrandSelection = BRAND_REQUIRED_TASKS.includes(selectedTask);
 
   // 使用共享的验证设置 Hook（支持持久化和跨组件同步）
   const {
@@ -37,7 +46,7 @@ export function SingleFileValidation({
     validateExcel,
     cancelValidation,
     clearResult,
-  } = useElectronValidation();
+  } = useValidation();
 
   // 拖拽计数器，用于正确处理子元素的 dragEnter/dragLeave
   const dragCounter = useRef(0);
@@ -108,13 +117,16 @@ export function SingleFileValidation({
 
   const handleValidate = async () => {
     if (!selectedFile) return;
-    await validateExcel(selectedFile, selectedTask, selectedSheet, validateAllImages, enableModelCapabilities);
+    // 仅当需要品牌选择时传递品牌参数
+    const brand = needsBrandSelection ? selectedBrand : undefined;
+    await validateExcel(selectedFile, selectedTask, selectedSheet, validateAllImages, enableModelCapabilities, brand);
   };
 
   const handleSheetSelect = async (sheetName: string) => {
     setSelectedSheet(sheetName);
     if (selectedFile) {
-      await validateExcel(selectedFile, selectedTask, sheetName, validateAllImages, enableModelCapabilities);
+      const brand = needsBrandSelection ? selectedBrand : undefined;
+      await validateExcel(selectedFile, selectedTask, sheetName, validateAllImages, enableModelCapabilities, brand);
     }
   };
 
@@ -165,6 +177,30 @@ export function SingleFileValidation({
               <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
             </div>
           </div>
+
+          {/* 品牌选择 - 仅在消费者调研/患者调研时显示 */}
+          {needsBrandSelection && (
+            <div className="mt-4">
+              <label className="text-sm font-medium text-zinc-700 mb-2 block">品牌</label>
+              <div className="relative">
+                <select
+                  value={selectedBrand}
+                  onChange={(e) => setSelectedBrand(e.target.value)}
+                  disabled={isValidating}
+                  className="w-full appearance-none bg-amber-50 border border-amber-200 text-zinc-900 text-sm font-medium rounded-md focus:ring-amber-500 focus:border-amber-500 block p-2.5 disabled:opacity-50 transition-colors"
+                >
+                  {AVAILABLE_BRANDS.map((brand) => (
+                    <option key={brand} value={brand}>
+                      {brand}
+                    </option>
+                  ))}
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-amber-600">
+                  <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                </div>
+              </div>
+            </div>
+          )}
           
           {/* 验证所有图片选项 */}
           <label className="flex items-center gap-2 mt-4 cursor-pointer group">

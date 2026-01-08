@@ -145,27 +145,18 @@ export class ImageValidator {
         }).slice(0, 3);
 
         if (sortedPersons.length === 1) {
-          // 单人：直接裁剪检测
+          // 单人：直接裁剪检测（无论人物大小，只要检测到就裁剪）
           const person = sortedPersons[0];
           const areaRatio = (person.bbox.width * person.bbox.height) / (metadata.width * metadata.height) * 100;
           
-          // 如果人物区域占比过小（< 1%），使用原图检测
-          // 这是因为过小的裁剪区域可能导致 CLIP 检测不准确
-          const MIN_CROP_AREA_RATIO = 1.0; // 最小裁剪面积占比 1%
-          
-          if (areaRatio < MIN_CROP_AREA_RATIO) {
-            validationLogger.info(`[图片 #${imageIndex}] 人物区域过小 (占比: ${areaRatio.toFixed(1)}% < ${MIN_CROP_AREA_RATIO}%)，使用原图检测`);
+          try {
+            const croppedBuffer = await yoloDetector.cropObject(imageBuffer, person, 0.15);
+            validationLogger.info(`[图片 #${imageIndex}] 已裁剪人物区域 (占比: ${areaRatio.toFixed(1)}%)`);
+            finalClipResult = await clipDetector.detect(croppedBuffer, { hasPerson, hasPlant });
+          } catch {
+            // 裁剪失败时使用原始图片
+            validationLogger.warn(`[图片 #${imageIndex}] 人物区域裁剪失败，使用原始图片`);
             finalClipResult = await clipDetector.detect(imageBuffer, { hasPerson, hasPlant });
-          } else {
-            try {
-              const croppedBuffer = await yoloDetector.cropObject(imageBuffer, person, 0.15);
-              validationLogger.info(`[图片 #${imageIndex}] 已裁剪人物区域 (占比: ${areaRatio.toFixed(1)}%)`);
-              finalClipResult = await clipDetector.detect(croppedBuffer, { hasPerson, hasPlant });
-            } catch {
-              // 裁剪失败时使用原始图片
-              validationLogger.warn(`[图片 #${imageIndex}] 人物区域裁剪失败，使用原始图片`);
-              finalClipResult = await clipDetector.detect(imageBuffer, { hasPerson, hasPlant });
-            }
           }
         } else {
           // 多人：分别检测后投票

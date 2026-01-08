@@ -18,8 +18,8 @@ const electronAPI = {
     ipcRenderer.invoke("get-excel-sheets", filePath),
 
   // 验证 Excel
-  validateExcel: (filePath: string, taskName: string, sheetName?: string, validateAllImages?: boolean, enableModelCapabilities?: boolean) =>
-    ipcRenderer.invoke("validate-excel", filePath, taskName, sheetName, validateAllImages, enableModelCapabilities),
+  validateExcel: (filePath: string, taskName: string, sheetName?: string, validateAllImages?: boolean, enableModelCapabilities?: boolean, brandName?: string) =>
+    ipcRenderer.invoke("validate-excel", filePath, taskName, sheetName, validateAllImages, enableModelCapabilities, brandName),
 
   // 取消验证
   cancelValidation: () => ipcRenderer.invoke("cancel-validation"),

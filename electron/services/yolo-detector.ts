@@ -64,7 +64,7 @@ export class YoloDetector {
   private session: OnnxRuntime.InferenceSession | null = null;
   private readonly modelPath: string;
   private readonly inputSize = 640;
-  private readonly confidenceThreshold = 0.5;
+  private readonly confidenceThreshold = 0.3; // 降低以检测更多物体
   private readonly iouThreshold = 0.45;
 
   constructor() {
@@ -299,7 +299,7 @@ export class YoloDetector {
       // 车辆
       "bicycle", "car", "motorcycle", "bus", "truck",
       // 常见摆放物品
-      "bottle", "cup", "chair", "potted plant",
+      "bottle", "cup", "chair", "bench", "potted plant",
       "backpack", "handbag", "suitcase", "umbrella",
       // 动物
       "cat", "dog", "bird",

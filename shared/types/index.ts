@@ -149,7 +149,8 @@ declare global {
         taskName: string,
         sheetName?: string,
         validateAllImages?: boolean,
-        enableModelCapabilities?: boolean
+        enableModelCapabilities?: boolean,
+        brandName?: string
       ) => Promise<ValidationResult>;
       cancelValidation: () => Promise<boolean>;
       exportValidationResult: (

@@ -7,6 +7,7 @@ import { AppLayout } from "./components/Layout/AppLayout";
 import { SingleFileValidation } from "./components/SingleFileValidation";
 import { FolderCompare } from "./components/FolderCompare";
 import { TASK_TEMPLATES } from "../shared/validation-rules";
+import { ValidationProvider } from "./contexts/ValidationContext";
 import "./styles/tailwind.css";
 
 function App() {
@@ -54,9 +55,11 @@ function App() {
   };
 
   return (
-    <AppLayout currentMode={mode} onModeChange={setMode}>
-      {renderContent()}
-    </AppLayout>
+    <ValidationProvider>
+      <AppLayout currentMode={mode} onModeChange={setMode}>
+        {renderContent()}
+      </AppLayout>
+    </ValidationProvider>
   );
 }
 

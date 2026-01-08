@@ -96,7 +96,7 @@ function registerIpcHandlers() {
   // 验证 Excel
   ipcMain.handle(
     "validate-excel",
-    async (event, filePath: string, taskName: string, sheetName?: string, validateAllImages?: boolean, enableModelCapabilities?: boolean) => {
+    async (event, filePath: string, taskName: string, sheetName?: string, validateAllImages?: boolean, enableModelCapabilities?: boolean, brandName?: string) => {
       console.log("\n" + "=".repeat(60));
       console.log("🚀 [IPC] validate-excel 请求开始");
       console.log("=".repeat(60));
@@ -105,6 +105,7 @@ function registerIpcHandlers() {
       console.log("📄 工作表:", sheetName || "(自动检测)");
       console.log("🖼️ 验证所有图片:", validateAllImages ? "是" : "否");
       console.log("🤖 模型能力:", enableModelCapabilities !== false ? "开启" : "关闭");
+      console.log("🏷️ 品牌:", brandName || "(无)");
       console.log("⏰ 时间:", new Date().toISOString());
       console.log("-".repeat(60));
 
@@ -126,7 +127,8 @@ function registerIpcHandlers() {
           sheetName,
           progressCallback,
           validateAllImages,
-          enableModelCapabilities
+          enableModelCapabilities,
+          brandName
         );
         
         const duration = Date.now() - startTime;

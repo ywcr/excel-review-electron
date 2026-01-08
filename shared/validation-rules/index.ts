@@ -27,6 +27,8 @@ export interface TaskTemplate {
   matchKeywords?: string[]; // 模糊匹配关键字（工作表名必须包含其中之一）
   fieldMappings: Record<string, string>; // Excel列名 -> 标准字段名映射
   validationRules: ValidationRule[];
+  skipImageValidation?: boolean; // 是否跳过图片验证（问卷类任务无图片）
+  exactMatchOnly?: boolean; // 是否只允许精确匹配工作表名（不匹配则让用户自选）
 }
 
 // 公共禁用词列表 - 用于所有拜访任务的内容验证
@@ -746,64 +748,29 @@ export const TASK_TEMPLATES: Record<string, TaskTemplate> = {
   消费者调研: {
     name: "消费者调研",
     description: "消费者调研任务验证",
-    // 模板总汇(消费者问卷数据清单)不包含"药店名称"
-    requiredFields: ["实施人", "调查对象姓名", "调研时间"],
+    skipImageValidation: true, // 问卷类任务无图片
+    exactMatchOnly: true, // 只允许精确匹配工作表名
+    requiredFields: ["实施人姓名", "调查对象姓名", "实施时间"],
     sheetNames: [
       // 优先匹配数据清单类工作表
       "消费者问卷数据清单",
       "消费者调研数据清单",
-      // 其次匹配模板与问卷页
-      "消费者调研",
-      "消费者问卷",
-      // 兜底关键词
-      "数据清单",
-      "消费者数据",
-      "Sheet1",
-      "工作表1",
     ],
     fieldMappings: {
       序号: "serialNumber",
       任务标题: "taskTitle",
-      实施人: "implementer",
       实施人姓名: "implementer",
-      实施人员: "implementer",
-      调查员: "implementer",
-      访员: "implementer",
-      执行人: "implementer",
+      实施人: "implementer",
       调查对象姓名: "surveyTargetName",
-      消费者姓名: "surveyTargetName",
-      被访者姓名: "surveyTargetName",
-      受访者姓名: "surveyTargetName",
-      调研对象姓名: "surveyTargetName",
-      被调查者姓名: "surveyTargetName",
-      药店名称: "pharmacyName",
-      门店名称: "pharmacyName",
-      药房名称: "pharmacyName",
-      药店名: "pharmacyName",
-      门店: "pharmacyName",
-      门店全称: "pharmacyName",
-      药店门店名称: "pharmacyName",
-      调研时间: "surveyTime",
+      调查对象性别: "surveyTargetGender",
       实施时间: "surveyTime",
-      调查时间: "surveyTime",
-      问卷时间: "surveyTime",
-      访问时间: "surveyTime",
-      填写时间: "surveyTime",
-      提交时间: "surveyTime",
-      调研地址: "surveyAddress",
-      调查地址: "surveyAddress",
-      门店地址: "surveyAddress",
-      药店地址: "surveyAddress",
-      地址: "surveyAddress",
-      问卷内容: "questionnaireContent",
-      问卷: "questionnaireContent",
-      备注: "notes",
+      调研时间: "surveyTime",
     },
     validationRules: [
       {
         field: "implementer",
         type: "required",
-        message: "实施人不能为空",
+        message: "实施人姓名不能为空",
       },
       {
         field: "surveyTargetName",
@@ -811,27 +778,15 @@ export const TASK_TEMPLATES: Record<string, TaskTemplate> = {
         message: "调查对象姓名不能为空",
       },
       {
-        field: "pharmacyName",
-        type: "required",
-        message: "药店名称不能为空",
-      },
-      {
         field: "surveyTime",
-        type: "dateFormat",
-        params: { allowTimeComponent: false },
-        message: "调研时间格式不正确，应为纯日期格式（如：2025-08-01）",
+        type: "required",
+        message: "实施时间不能为空",
       },
       {
         field: "surveyTargetName",
         type: "unique",
         params: { scope: "global" },
-        message: "调查对象姓名永远不能重复",
-      },
-      {
-        field: "implementer",
-        type: "frequency",
-        params: { maxPerDay: 50, groupBy: "implementer" },
-        message: "同一实施人每日不得超过50份",
+        message: "调查对象姓名不能重复",
       },
     ],
   },
@@ -839,64 +794,29 @@ export const TASK_TEMPLATES: Record<string, TaskTemplate> = {
   患者调研: {
     name: "患者调研",
     description: "患者调研任务验证",
-    // 模板总汇(患者问卷数据清单)不包含“药店名称”
-    requiredFields: ["实施人", "调查对象姓名", "调研时间"],
+    skipImageValidation: true, // 问卷类任务无图片
+    exactMatchOnly: true, // 只允许精确匹配工作表名
+    requiredFields: ["实施人姓名", "调查对象姓名", "实施时间"],
     sheetNames: [
       // 优先匹配数据清单类工作表
       "患者问卷数据清单",
       "患者调研数据清单",
-      // 其次匹配模板与问卷页
-      "患者调研",
-      "患者问卷",
-      // 兜底关键词
-      "数据清单",
-      "患者数据",
-      "Sheet1",
-      "工作表1",
     ],
     fieldMappings: {
       序号: "serialNumber",
       任务标题: "taskTitle",
-      实施人: "implementer",
       实施人姓名: "implementer",
-      实施人员: "implementer",
-      调查员: "implementer",
-      访员: "implementer",
-      执行人: "implementer",
+      实施人: "implementer",
       调查对象姓名: "surveyTargetName",
-      患者姓名: "surveyTargetName",
-      被访者姓名: "surveyTargetName",
-      受访者姓名: "surveyTargetName",
-      调研对象姓名: "surveyTargetName",
-      被调查者姓名: "surveyTargetName",
-      药店名称: "pharmacyName",
-      门店名称: "pharmacyName",
-      药房名称: "pharmacyName",
-      药店名: "pharmacyName",
-      门店: "pharmacyName",
-      门店全称: "pharmacyName",
-      药店门店名称: "pharmacyName",
-      调研时间: "surveyTime",
+      调查对象性别: "surveyTargetGender",
       实施时间: "surveyTime",
-      调查时间: "surveyTime",
-      问卷时间: "surveyTime",
-      访问时间: "surveyTime",
-      填写时间: "surveyTime",
-      提交时间: "surveyTime",
-      调研地址: "surveyAddress",
-      调查地址: "surveyAddress",
-      门店地址: "surveyAddress",
-      药店地址: "surveyAddress",
-      地址: "surveyAddress",
-      问卷内容: "questionnaireContent",
-      问卷: "questionnaireContent",
-      备注: "notes",
+      调研时间: "surveyTime",
     },
     validationRules: [
       {
         field: "implementer",
         type: "required",
-        message: "实施人不能为空",
+        message: "实施人姓名不能为空",
       },
       {
         field: "surveyTargetName",
@@ -904,27 +824,15 @@ export const TASK_TEMPLATES: Record<string, TaskTemplate> = {
         message: "调查对象姓名不能为空",
       },
       {
-        field: "pharmacyName",
-        type: "required",
-        message: "药店名称不能为空",
-      },
-      {
         field: "surveyTime",
-        type: "dateFormat",
-        params: { allowTimeComponent: false },
-        message: "调研时间格式不正确，应为纯日期格式（如：2025-08-01）",
+        type: "required",
+        message: "实施时间不能为空",
       },
       {
         field: "surveyTargetName",
         type: "unique",
         params: { scope: "global" },
-        message: "调查对象姓名永远不能重复",
-      },
-      {
-        field: "implementer",
-        type: "frequency",
-        params: { maxPerDay: 20, groupBy: "implementer" },
-        message: "同一实施人每日不得超过20份",
+        message: "调查对象姓名不能重复",
       },
     ],
   },

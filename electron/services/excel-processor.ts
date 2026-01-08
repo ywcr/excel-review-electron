@@ -4,6 +4,7 @@ import type {
   ValidationResult,
   TaskTemplate,
   ImageValidationError,
+  ValidationError,
 } from "../../shared/types";
 import { TASK_TEMPLATES } from "../../shared/validation-rules";
 import { RowValidator } from "../validators/row-validator";
@@ -11,6 +12,7 @@ import { ImageValidator } from "../validators/image-validator";
 import { WpsImageExtractor } from "./wps-image-extractor";
 import { XlsxParser } from "./xlsx-parser";
 import { ImageValidationService } from "./image-validation-service";
+import { validateQuestionnaireHeaders, validateRowAnswers, QuestionnaireError, AnswerValidationError } from "./questionnaire-validator";
 
 export class ExcelStreamProcessor {
   private isCancelled = false;
@@ -28,11 +30,12 @@ export class ExcelStreamProcessor {
     sheetName?: string,
     onProgress?: (progress: number, message: string) => void,
     validateAllImages?: boolean,
-    enableModelCapabilities?: boolean
+    enableModelCapabilities?: boolean,
+    brandName?: string
   ): Promise<ValidationResult> {
     this.isCancelled = false;
 
-    console.log("🚀 [验证开始]", { filePath, taskName, sheetName, validateAllImages, enableModelCapabilities });
+    console.log("🚀 [验证开始]", { filePath, taskName, sheetName, validateAllImages, enableModelCapabilities, brandName });
     onProgress?.(0, "[1/6] 正在打开文件...");
 
     const template = TASK_TEMPLATES[taskName];
@@ -93,17 +96,28 @@ export class ExcelStreamProcessor {
       }
 
       // 如果没指定工作表名，尝试匹配模板
-      const matchesTemplate =
-        !sheetName && this.xlsxParser.matchesTemplate(currentSheetName, template);
+      const matchPriority = !sheetName 
+        ? this.xlsxParser.getMatchPriority(currentSheetName, template)
+        : 0;
+      
+      // 如果配置了 exactMatchOnly，只接受精确匹配
+      const effectiveMatch = template.exactMatchOnly 
+        ? matchPriority === 2  // 只有精确匹配才算匹配
+        : matchPriority > 0;   // 模糊匹配也算
 
       console.log(`🔍 [工作表匹配] "${currentSheetName}":`, {
         sheetNameProvided: !!sheetName,
-        matchesTemplate,
+        matchPriority, // 0=不匹配, 1=模糊匹配, 2=精确匹配
+        exactMatchOnly: template.exactMatchOnly,
+        effectiveMatch,
         templateSheetNames: template.sheetNames,
       });
 
-      if (!sheetName && !matchesTemplate) {
-        console.log(`⚠️  [跳过] 工作表 "${currentSheetName}" 不匹配模板`);
+      if (!sheetName && !effectiveMatch) {
+        const reason = matchPriority === 1 && template.exactMatchOnly 
+          ? "模糊匹配，但任务要求精确匹配"
+          : "不匹配模板";
+        console.log(`⚠️  [跳过] 工作表 "${currentSheetName}" - ${reason}`);
         // 不匹配，但收集信息
         for await (const row of worksheetReader) {
           rowCount++;
@@ -141,7 +155,8 @@ export class ExcelStreamProcessor {
         // However, the original code used `totalRows` for actual data rows.
         // I will remove `rowCount++` here to avoid confusion and stick to `totalRows` for data rows.
 
-        if (rowIndex <= 5) {
+        // 只在未找到表头时输出检查日志
+        if (rowIndex <= 5 && !foundHeader) {
           console.log(`  行 ${rowIndex}: 正在检查是否为表头...`);
         }
 
@@ -165,6 +180,34 @@ export class ExcelStreamProcessor {
               headerRowIndex,
               headerRow,
             });
+
+            // 🔍 问卷验证：如果是消费者调研/患者调研且指定了品牌，验证问卷题目
+            if (brandName && (taskName === "消费者调研" || taskName === "患者调研")) {
+              console.log("📝 [问卷验证] 开始验证问卷题目...");
+              const questionnaireResult = validateQuestionnaireHeaders(
+                headerRow.map(h => h?.toString() || ""),
+                brandName,
+                taskName
+              );
+
+              if (!questionnaireResult.isValid) {
+                console.log(`❌ [问卷验证] 发现 ${questionnaireResult.errors.length} 个问题`);
+                // 将问卷验证错误转换为 ValidationError
+                for (const qError of questionnaireResult.errors) {
+                  errors.push({
+                    row: headerRowIndex,
+                    column: `第${qError.questionNumber}题`,
+                    field: "问卷题目",
+                    value: qError.actual,
+                    message: `${qError.message}${qError.expected ? `\n标准: ${qError.expected.substring(0, 50)}...` : ""}${qError.actual ? `\n实际: ${qError.actual.substring(0, 50)}...` : ""}`,
+                    errorType: "questionnaireValidation",
+                  });
+                }
+              } else {
+                console.log("✅ [问卷验证] 验证通过");
+              }
+            }
+
             continue; // Continue to the next row after finding header
           }
         }
@@ -197,6 +240,28 @@ export class ExcelStreamProcessor {
             template.validationRules
           );
           errors.push(...rowErrors);
+
+          // 🔍 问卷回答验证：如果是消费者调研/患者调研且指定了品牌，验证回答内容
+          if (brandName && (taskName === "消费者调研" || taskName === "患者调研")) {
+            const answerErrors = validateRowAnswers(
+              headerRow.map(h => h?.toString() || ""),
+              rowArray,
+              rowIndex,
+              brandName,
+              taskName
+            );
+            // 将回答验证错误转换为 ValidationError
+            for (const aError of answerErrors) {
+              errors.push({
+                row: aError.row,
+                column: `第${aError.questionNumber}题`,
+                field: "问卷回答",
+                value: aError.actualAnswer,
+                message: `${aError.message}\n有效选项: ${aError.expectedOptions}\n实际回答: ${aError.actualAnswer}`,
+                errorType: "answerValidation",
+              });
+            }
+          }
 
           // 添加到验证器缓存（用于跨行验证）
           validator.addRowData(rowIndex, rowData);
@@ -278,6 +343,13 @@ export class ExcelStreamProcessor {
     };
     let imageValidationSkipped = false;
     let imageValidationSkipReason = "";
+
+    // 检查是否跳过图片验证（问卷类任务无图片）
+    if (template.skipImageValidation) {
+      imageValidationSkipped = true;
+      imageValidationSkipReason = "此任务类型无需图片验证";
+      console.log("⏭️ [图片验证] 跳过 - 任务模板配置 skipImageValidation=true");
+    } else {
 
     // 获取文件大小用于日志
     const fs = await import("fs");
@@ -497,6 +569,7 @@ export class ExcelStreamProcessor {
       });
       // 图片验证失败不阻止整体验证
     }
+    } // 关闭 else 块 (skipImageValidation)
 
     onProgress?.(95, "[6/6] 正在生成验证报告...");
 

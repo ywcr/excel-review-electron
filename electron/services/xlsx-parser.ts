@@ -104,10 +104,27 @@ export class XlsxParser {
 
   /**
    * 检查工作表名是否匹配模板
+   * 返回匹配优先级: 0=不匹配, 1=模糊匹配, 2=精确匹配
    */
   matchesTemplate(sheetName: string, template: TaskTemplate): boolean {
-    return template.sheetNames.some(
+    return this.getMatchPriority(sheetName, template) > 0;
+  }
+
+  /**
+   * 获取工作表名与模板的匹配优先级
+   * @returns 0=不匹配, 1=模糊匹配, 2=精确匹配
+   */
+  getMatchPriority(sheetName: string, template: TaskTemplate): number {
+    // 先检查精确匹配
+    if (template.sheetNames.includes(sheetName)) {
+      return 2; // 精确匹配
+    }
+
+    // 再检查模糊匹配
+    const fuzzyMatch = template.sheetNames.some(
       (name) => sheetName.includes(name) || name.includes(sheetName)
     );
+
+    return fuzzyMatch ? 1 : 0;
   }
 }

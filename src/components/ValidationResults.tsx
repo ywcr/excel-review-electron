@@ -256,19 +256,36 @@ export function ValidationResults({
         </div>
       )}
 
-      {/* 图片验证跳过警告 */}
+      {/* 图片验证跳过提示 */}
       {summary.imageValidationSkipped && (
-        <div className="bg-amber-50 rounded-lg p-4 border border-amber-200">
+        <div className={`rounded-lg p-4 border ${
+          summary.imageValidationSkipReason === '此任务类型无需图片验证'
+            ? 'bg-blue-50 border-blue-200'
+            : 'bg-amber-50 border-amber-200'
+        }`}>
           <div className="flex items-start gap-3">
-            <span className="text-2xl">⚠️</span>
+            <span className="text-2xl">
+              {summary.imageValidationSkipReason === '此任务类型无需图片验证' ? 'ℹ️' : '⚠️'}
+            </span>
             <div>
-              <h4 className="text-sm font-bold text-amber-900 mb-1">图片验证已跳过</h4>
-              <p className="text-sm text-amber-800">
+              <h4 className={`text-sm font-bold mb-1 ${
+                summary.imageValidationSkipReason === '此任务类型无需图片验证'
+                  ? 'text-blue-900'
+                  : 'text-amber-900'
+              }`}>图片验证已跳过</h4>
+              <p className={`text-sm ${
+                summary.imageValidationSkipReason === '此任务类型无需图片验证'
+                  ? 'text-blue-800'
+                  : 'text-amber-800'
+              }`}>
                 {summary.imageValidationSkipReason || '文件过大，无法进行图片验证'}
               </p>
-              <p className="text-xs text-amber-600 mt-2">
-                建议：将文件拆分成多个较小的文件（小于 2GB）后重新审核。
-              </p>
+              {/* 只有非"任务类型无需"的情况才显示拆分建议 */}
+              {summary.imageValidationSkipReason !== '此任务类型无需图片验证' && (
+                <p className="text-xs text-amber-600 mt-2">
+                  建议：将文件拆分成多个较小的文件（小于 2GB）后重新审核。
+                </p>
+              )}
             </div>
           </div>
         </div>

@@ -20,7 +20,7 @@ export function useElectronValidation() {
 
   // 验证 Excel
   const validateExcel = useCallback(
-    async (filePath: string, taskName: string, sheetName?: string, validateAllImages?: boolean, enableModelCapabilities?: boolean) => {
+    async (filePath: string, taskName: string, sheetName?: string, validateAllImages?: boolean, enableModelCapabilities?: boolean, brandName?: string) => {
       setResult(null);
       setError(null);
       setProgress(null);
@@ -37,7 +37,8 @@ export function useElectronValidation() {
           taskName,
           sheetName,
           validateAllImages,
-          enableModelCapabilities
+          enableModelCapabilities,
+          brandName
         );
         setResult(validationResult);
         setProgress(null);
