@@ -7,8 +7,8 @@ import {
 } from "../UI/Icons";
 
 interface SidebarProps {
-  currentMode: "single" | "batch" | "compare" | "history" | "folder";
-  onModeChange: (mode: "single" | "batch" | "compare" | "history" | "folder") => void;
+  currentMode: "single" | "batch" | "compare" | "history" | "folder" | "functions";
+  onModeChange: (mode: "single" | "batch" | "compare" | "history" | "folder" | "functions") => void;
 }
 
 export function Sidebar({ currentMode, onModeChange }: SidebarProps) {
@@ -18,6 +18,7 @@ export function Sidebar({ currentMode, onModeChange }: SidebarProps) {
     { id: "folder", label: "图片重复检测", icon: <span className="text-base">📷</span> },
     { id: "compare", label: "文件比较", icon: <BarChartIcon size={18} /> },
     { id: "history", label: "验证历史", icon: <ClockIcon size={18} /> },
+    { id: "functions", label: "函数学习助手", icon: <span className="text-base">🎓</span> },
   ] as const;
 
   return (

@@ -38,9 +38,7 @@ const CLASS_NAMES_CN: Record<string, string> = {
   "traffic light": "交通灯",
   "stop sign": "停车标志",
   "fire hydrant": "消防栓",
-  "bench": "长椅",
   "bird": "鸟",
-  "cat": "猫",
   "dog": "狗",
   "umbrella": "雨伞",
   "handbag": "手提包",
@@ -64,7 +62,7 @@ export class YoloDetector {
   private session: OnnxRuntime.InferenceSession | null = null;
   private readonly modelPath: string;
   private readonly inputSize = 640;
-  private readonly confidenceThreshold = 0.3; // 降低以检测更多物体
+  private readonly confidenceThreshold = 0.4; // 物体检测置信度阈值
   private readonly iouThreshold = 0.45;
 
   constructor() {
@@ -299,7 +297,7 @@ export class YoloDetector {
       // 车辆
       "bicycle", "car", "motorcycle", "bus", "truck",
       // 常见摆放物品
-      "bottle", "cup", "chair", "bench", "potted plant",
+      "bottle", "cup", "chair", "potted plant",
       "backpack", "handbag", "suitcase", "umbrella",
       // 动物
       "cat", "dog", "bird",

@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { ImageModal } from "./ImagePreview";
 import { DuplicateCompareModal } from "./DuplicateCompareModal";
 import { GhostButton, OutlineButton } from "./UI/Buttons";
+import { useAIChat } from "../contexts/AIChatContext";
 import type { ValidationError, ImageValidationError, ValidationResult } from "../../shared/types";
 
 interface ValidationResultsProps {
@@ -35,6 +36,41 @@ const IMAGE_ERROR_TYPE_LABELS: Record<string, string> = {
 
   objectDuplicate: "物体重复",
 };
+
+// Ask AI 按钮组件
+function AskAIButton({ 
+  error, 
+  taskName, 
+  fileName 
+}: { 
+  error: ValidationError; 
+  taskName: string; 
+  fileName?: string;
+}) {
+  const { setSelectedError, updateTask, openChat } = useAIChat();
+  
+  const handleClick = () => {
+    updateTask(taskName, fileName);
+    setSelectedError({
+      row: error.row,
+      field: error.field,
+      errorType: error.errorType,
+      value: String(error.value ?? ''),
+      expected: error.message
+    });
+    openChat();
+  };
+  
+  return (
+    <button
+      onClick={handleClick}
+      className="text-xs font-medium text-purple-600 hover:text-purple-800 hover:underline"
+      title="询问 AI 如何修复"
+    >
+      🤖 问问
+    </button>
+  );
+}
 
 export function ValidationResults({
   result,
@@ -325,6 +361,7 @@ export function ValidationResults({
                   <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200 w-32">类型</th>
                   <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200">错误信息</th>
                   <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200 w-48 text-right">当前值</th>
+                  <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200 w-20 text-center">AI</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100 font-mono text-sm">
@@ -340,6 +377,9 @@ export function ValidationResults({
                     <td className="py-3 px-4 text-zinc-600">{err.message}</td>
                     <td className="py-3 px-4 text-right text-zinc-500 truncate max-w-[200px]" title={String(err.value)}>
                       {err.value !== undefined ? String(err.value) : <span className="text-zinc-300">-</span>}
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      <AskAIButton error={err} taskName={taskName} fileName={fileName} />
                     </td>
                   </tr>
                 ))}

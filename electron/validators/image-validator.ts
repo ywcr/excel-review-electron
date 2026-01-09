@@ -208,8 +208,33 @@ export class ImageValidator {
           }
         }
       } else {
-        // 只有植物没有人物：使用原图检测
-        finalClipResult = await clipDetector.detect(imageBuffer, { hasPerson: false, hasPlant });
+        // 只有植物没有人物：裁剪植物区域后检测
+        const plantDetections = detections.filter(d => d.class === "potted plant");
+        
+        // 按面积排序，取最大的植物
+        const sortedPlants = [...plantDetections].sort((a, b) => {
+          const areaA = a.bbox.width * a.bbox.height;
+          const areaB = b.bbox.width * b.bbox.height;
+          return areaB - areaA;
+        });
+
+        if (sortedPlants.length > 0) {
+          const plant = sortedPlants[0];
+          const areaRatio = (plant.bbox.width * plant.bbox.height) / (metadata.width * metadata.height) * 100;
+          
+          try {
+            const croppedBuffer = await yoloDetector.cropObject(imageBuffer, plant, 0.2);
+            validationLogger.info(`[图片 #${imageIndex}] 已裁剪植物区域 (占比: ${areaRatio.toFixed(1)}%)`);
+            finalClipResult = await clipDetector.detect(croppedBuffer, { hasPerson: false, hasPlant: true });
+          } catch {
+            // 裁剪失败时使用原始图片
+            validationLogger.warn(`[图片 #${imageIndex}] 植物区域裁剪失败，使用原始图片`);
+            finalClipResult = await clipDetector.detect(imageBuffer, { hasPerson: false, hasPlant });
+          }
+        } else {
+          // 无法获取植物检测结果，使用原图
+          finalClipResult = await clipDetector.detect(imageBuffer, { hasPerson: false, hasPlant });
+        }
       }
 
       if (!finalClipResult) {
