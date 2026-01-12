@@ -277,6 +277,7 @@ export function ValidationHistory({ onSelect }: { onSelect?: (record: HistoryRec
                 result={fullReportResult.result}
                 taskName={fullReportResult.record.taskName}
                 fileName={fullReportResult.record.fileName}
+                isMergeMode={!!fullReportResult.result.mergeStats}
               />
             </div>
           </div>

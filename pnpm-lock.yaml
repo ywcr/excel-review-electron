@@ -35,6 +35,9 @@ importers:
       pako:
         specifier: ^2.1.0
         version: 2.1.0
+      readable-stream:
+        specifier: ^3.6.2
+        version: 3.6.2
       setimmediate:
         specifier: ^1.0.5
         version: 1.0.5
