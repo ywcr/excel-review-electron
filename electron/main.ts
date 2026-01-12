@@ -194,6 +194,105 @@ function registerIpcHandlers() {
     return false;
   });
 
+  // 合并验证两个 Excel 文件
+  ipcMain.handle(
+    "validate-merged-excel",
+    async (
+      event,
+      filePath1: string,
+      filePath2: string,
+      taskName: string,
+      sheetName1?: string,
+      sheetName2?: string,
+      validateAllImages?: boolean,
+      enableModelCapabilities?: boolean,
+      brandName?: string
+    ) => {
+      console.log("\n" + "=".repeat(60));
+      console.log("🚀 [IPC] validate-merged-excel 请求开始");
+      console.log("=".repeat(60));
+      console.log("📁 文件1路径:", filePath1);
+      console.log("📁 文件2路径:", filePath2);
+      console.log("📋 任务类型:", taskName);
+      console.log("📄 工作表1:", sheetName1 || "(自动检测)");
+      console.log("📄 工作表2:", sheetName2 || "(自动检测)");
+      console.log("🖼️ 验证所有图片:", validateAllImages ? "是" : "否");
+      console.log("🤖 模型能力:", enableModelCapabilities !== false ? "开启" : "关闭");
+      console.log("🏷️ 品牌:", brandName || "(无)");
+      console.log("⏰ 时间:", new Date().toISOString());
+      console.log("-".repeat(60));
+
+      const startTime = Date.now();
+
+      try {
+        const processor = new ExcelStreamProcessor();
+        currentProcessor = processor;
+
+        const progressCallback = (progress: number, message: string) => {
+          console.log(`📊 [进度] ${progress}% - ${message}`);
+          event.sender.send("validation-progress", { progress, message });
+        };
+
+        console.log("🔄 [IPC] 开始调用 processor.validateMergedFiles...");
+        const result = await processor.validateMergedFiles(
+          filePath1,
+          filePath2,
+          taskName,
+          sheetName1,
+          sheetName2,
+          progressCallback,
+          validateAllImages,
+          enableModelCapabilities,
+          brandName
+        );
+
+        currentProcessor = null;
+
+        const duration = Date.now() - startTime;
+        console.log("-".repeat(60));
+        console.log("✅ [IPC] validate-merged-excel 请求完成");
+        console.log("⏱️  耗时:", duration, "ms");
+        console.log("📊 结果:", {
+          isValid: result.isValid,
+          totalRows: result.summary?.totalRows,
+          errorCount: result.summary?.errorCount,
+          imageErrors: result.imageErrors?.length || 0,
+        });
+        console.log("=".repeat(60) + "\n");
+
+        // 保存历史记录
+        if (!result.needSheetSelection) {
+          const fileName1 = path.basename(filePath1);
+          const fileName2 = path.basename(filePath2);
+          historyStore.addRecord({
+            fileName: `[合并] ${fileName1} + ${fileName2}`,
+            filePath: filePath1, // 使用第一个文件路径作为主标识
+            taskName,
+            summary: {
+              totalRows: result.summary?.totalRows || 0,
+              errorCount: result.summary?.errorCount || 0,
+              imageErrorCount: result.imageErrors?.length || 0,
+            },
+            isValid: result.isValid,
+            previewErrors: result.errors ? result.errors.slice(0, 20) : [],
+            previewImageErrors: result.imageErrors ? result.imageErrors.slice(0, 5) : [],
+          }, result);
+        }
+
+        return result;
+      } catch (error) {
+        currentProcessor = null;
+        const duration = Date.now() - startTime;
+        console.log("-".repeat(60));
+        console.error("❌ [IPC] validate-merged-excel 请求失败");
+        console.error("⏱️  耗时:", duration, "ms");
+        console.error("错误:", error);
+        console.log("=".repeat(60) + "\n");
+        throw error;
+      }
+    }
+  );
+
   // ========== 历史记录 IPC ==========
   // 获取所有历史记录
   ipcMain.handle("get-history", async () => {

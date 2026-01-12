@@ -21,6 +21,16 @@ interface ValidationContextValue extends ValidationState {
     enableModelCapabilities?: boolean,
     brandName?: string
   ) => Promise<void>;
+  validateMergedExcel: (
+    filePath1: string,
+    filePath2: string,
+    taskName: string,
+    sheetName1?: string,
+    sheetName2?: string,
+    validateAllImages?: boolean,
+    enableModelCapabilities?: boolean,
+    brandName?: string
+  ) => Promise<void>;
   cancelValidation: () => Promise<void>;
   clearResult: () => void;
 }
@@ -121,6 +131,67 @@ export function ValidationProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  // 合并验证两个 Excel
+  const validateMergedExcel = useCallback(
+    async (
+      filePath1: string,
+      filePath2: string,
+      taskName: string,
+      sheetName1?: string,
+      sheetName2?: string,
+      validateAllImages?: boolean,
+      enableModelCapabilities?: boolean,
+      brandName?: string
+    ) => {
+      setState(prev => ({
+        ...prev,
+        result: null,
+        error: null,
+        progress: null,
+        isValidating: true,
+        currentFile: `${filePath1} + ${filePath2}`,
+        currentTask: taskName,
+      }));
+
+      // 监听进度更新
+      if (!progressListenerRef.current) {
+        window.electron.onProgress((data) => {
+          setState(prev => ({
+            ...prev,
+            progress: data,
+          }));
+        });
+        progressListenerRef.current = true;
+      }
+
+      try {
+        const validationResult = await window.electron.validateMergedExcel(
+          filePath1,
+          filePath2,
+          taskName,
+          sheetName1,
+          sheetName2,
+          validateAllImages,
+          enableModelCapabilities,
+          brandName
+        );
+        setState(prev => ({
+          ...prev,
+          result: validationResult,
+          progress: null,
+          isValidating: false,
+        }));
+      } catch (err) {
+        setState(prev => ({
+          ...prev,
+          error: err instanceof Error ? err.message : "合并验证失败",
+          isValidating: false,
+        }));
+      }
+    },
+    []
+  );
+
   // 清除结果
   const clearResult = useCallback(() => {
     setState(prev => ({
@@ -147,6 +218,7 @@ export function ValidationProvider({ children }: { children: ReactNode }) {
         ...state,
         selectFile,
         validateExcel,
+        validateMergedExcel,
         cancelValidation,
         clearResult,
       }}

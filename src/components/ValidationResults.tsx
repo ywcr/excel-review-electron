@@ -10,6 +10,8 @@ interface ValidationResultsProps {
   taskName: string;
   fileName?: string;
   onExport?: () => void;
+  /** 是否为合并验证模式 */
+  isMergeMode?: boolean;
 }
 
 const ERROR_TYPE_LABELS: Record<string, string> = {
@@ -77,6 +79,7 @@ export function ValidationResults({
   taskName,
   fileName,
   onExport,
+  isMergeMode = false,
 }: ValidationResultsProps) {
   const [filterType, setFilterType] = useState<string>("all");
   const [imageFilterType, setImageFilterType] = useState<string>("all");
@@ -357,17 +360,26 @@ export function ValidationResults({
               <thead>
                 <tr>
                   <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200 w-16">行号</th>
+                  {isMergeMode && <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200 w-24">来源</th>}
                   <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200 w-32">字段</th>
                   <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200 w-32">类型</th>
                   <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200">错误信息</th>
                   <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200 w-48 text-right">当前值</th>
-                  <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200 w-20 text-center">AI</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100 font-mono text-sm">
                 {paginatedErrors.map((err, idx) => (
                   <tr key={idx} className="group hover:bg-zinc-50 transition-colors">
                     <td className="py-3 px-4 text-zinc-500">{err.row}</td>
+                    {isMergeMode && (
+                      <td className="py-3 px-4">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium ${
+                          err.sourceFile === 'file1' ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'bg-green-50 text-green-700 border border-green-100'
+                        }`}>
+                          {err.sourceFileName || (err.sourceFile === 'file1' ? '文件A' : '文件B')}
+                        </span>
+                      </td>
+                    )}
                     <td className="py-3 px-4 text-zinc-900 font-medium">{err.field}</td>
                     <td className="py-3 px-4">
                       <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-red-50 text-red-700 border border-red-100/50">
@@ -377,9 +389,6 @@ export function ValidationResults({
                     <td className="py-3 px-4 text-zinc-600">{err.message}</td>
                     <td className="py-3 px-4 text-right text-zinc-500 truncate max-w-[200px]" title={String(err.value)}>
                       {err.value !== undefined ? String(err.value) : <span className="text-zinc-300">-</span>}
-                    </td>
-                    <td className="py-3 px-4 text-center">
-                      <AskAIButton error={err} taskName={taskName} fileName={fileName} />
                     </td>
                   </tr>
                 ))}
@@ -444,6 +453,7 @@ export function ValidationResults({
               <thead>
                 <tr>
                   <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200 w-20">序号</th>
+                  {isMergeMode && <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200 w-24">来源</th>}
                   <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200 w-32">位置</th>
                   <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200 w-24">类型</th>
                   <th className="py-3 px-4 text-xs font-medium text-zinc-400 font-normal uppercase tracking-wider border-b border-zinc-200">详情</th>
@@ -456,6 +466,15 @@ export function ValidationResults({
                   .map((err, idx) => (
                   <tr key={idx} className="group hover:bg-zinc-50 transition-colors">
                     <td className="py-3 px-4 text-zinc-500">#{err.imageIndex}</td>
+                    {isMergeMode && (
+                      <td className="py-3 px-4">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium ${
+                          err.sourceFile === 'file1' ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'bg-green-50 text-green-700 border border-green-100'
+                        }`}>
+                          {err.sourceFileName || (err.sourceFile === 'file1' ? '文件A' : '文件B')}
+                        </span>
+                      </td>
+                    )}
                     <td className="py-3 px-4 text-zinc-900">
                       行{err.row}
                       {err.column && ` 列${err.column}`}

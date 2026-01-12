@@ -866,4 +866,304 @@ export class ExcelStreamProcessor {
 
     return { errors, stats };
   }
+
+  /**
+   * 合并验证两个 Excel 文件
+   * 将两个文件的数据合并后进行统一验证
+   */
+  async validateMergedFiles(
+    filePath1: string,
+    filePath2: string,
+    taskName: string,
+    sheetName1?: string,
+    sheetName2?: string,
+    onProgress?: (progress: number, message: string) => void,
+    validateAllImages?: boolean,
+    enableModelCapabilities?: boolean,
+    brandName?: string
+  ): Promise<ValidationResult> {
+    this.isCancelled = false;
+
+    const path = await import("path");
+    const fileName1 = path.basename(filePath1);
+    const fileName2 = path.basename(filePath2);
+
+    console.log("🔀 [合并验证开始]", { filePath1, filePath2, taskName, sheetName1, sheetName2 });
+    onProgress?.(0, "[1/7] 正在加载任务模板...");
+
+    const template = TASK_TEMPLATES[taskName];
+    if (!template) {
+      throw new Error(`未找到任务模板: ${taskName}`);
+    }
+
+    // 辅助函数：从单个文件读取数据行
+    const readFileData = async (
+      filePath: string,
+      sheetName: string | undefined,
+      sourceFile: 'file1' | 'file2',
+      sourceFileName: string
+    ): Promise<{
+      rows: Array<{ rowIndex: number; data: Record<string, any>; rawArray: any[] }>;
+      headerRow: any[];
+      sheetUsed: string;
+    }> => {
+      const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader(filePath, {
+        sharedStrings: "cache",
+        hyperlinks: "cache",
+        worksheets: "emit",
+      });
+
+      const rows: Array<{ rowIndex: number; data: Record<string, any>; rawArray: any[] }> = [];
+      let headerRow: any[] = [];
+      let sheetUsed = "";
+
+      for await (const worksheetReader of workbookReader) {
+        const currentSheetName = (worksheetReader as any).name;
+
+        // 如果指定了工作表名，只处理该工作表
+        if (sheetName && currentSheetName !== sheetName) {
+          for await (const row of worksheetReader) {
+            // 消费数据
+          }
+          continue;
+        }
+
+        // 匹配工作表
+        const matchPriority = !sheetName
+          ? this.xlsxParser.getMatchPriority(currentSheetName, template)
+          : 2; // 指定了 sheetName 视为精确匹配
+
+        if (!sheetName && matchPriority === 0) {
+          for await (const row of worksheetReader) {
+            // 消费数据
+          }
+          continue;
+        }
+
+        sheetUsed = currentSheetName;
+        let foundHeader = false;
+        let headerRowIndex = 0;
+        let rowIndex = 0;
+
+        for await (const row of worksheetReader) {
+          if (this.isCancelled) throw new Error("验证已取消");
+
+          rowIndex++;
+
+          // 查找表头（前10行）
+          if (rowIndex <= 10 && !foundHeader) {
+            const rowData = this.xlsxParser.extractRowData(row);
+            if (this.xlsxParser.isHeaderRow(rowData, template)) {
+              headerRow = rowData;
+              headerRowIndex = rowIndex;
+              foundHeader = true;
+              continue;
+            }
+          }
+
+          // 读取数据行
+          if (foundHeader && rowIndex > headerRowIndex) {
+            const rowArray = this.xlsxParser.extractRowData(row);
+            const isEmptyRow = rowArray.every(
+              (cell) => cell === null || cell === undefined || (typeof cell === "string" && cell.trim() === "")
+            );
+            if (isEmptyRow) continue;
+
+            const rowData = this.xlsxParser.arrayToObject(rowArray, headerRow, template);
+            rows.push({
+              rowIndex,
+              data: rowData,
+              rawArray: rowArray,
+            });
+          }
+        }
+
+        break; // 只处理第一个匹配的工作表
+      }
+
+      return { rows, headerRow, sheetUsed };
+    };
+
+    // 读取两个文件的数据
+    onProgress?.(10, `[2/7] 正在读取文件1: ${fileName1}...`);
+    const file1Data = await readFileData(filePath1, sheetName1, 'file1', fileName1);
+
+    if (this.isCancelled) throw new Error("验证已取消");
+
+    onProgress?.(25, `[3/7] 正在读取文件2: ${fileName2}...`);
+    const file2Data = await readFileData(filePath2, sheetName2, 'file2', fileName2);
+
+    if (this.isCancelled) throw new Error("验证已取消");
+
+    // 验证表头是否一致
+    if (file1Data.headerRow.length !== file2Data.headerRow.length) {
+      console.warn("⚠️ [合并验证] 两个文件的列数不一致", {
+        file1Cols: file1Data.headerRow.length,
+        file2Cols: file2Data.headerRow.length,
+      });
+    }
+
+    console.log("📊 [合并验证] 数据统计", {
+      file1Rows: file1Data.rows.length,
+      file2Rows: file2Data.rows.length,
+      file1Sheet: file1Data.sheetUsed,
+      file2Sheet: file2Data.sheetUsed,
+    });
+
+    // 合并数据，并记录来源
+    const mergedRows = [
+      ...file1Data.rows.map((r) => ({ ...r, sourceFile: 'file1' as const, sourceFileName: fileName1 })),
+      ...file2Data.rows.map((r) => ({ ...r, sourceFile: 'file2' as const, sourceFileName: fileName2 })),
+    ];
+
+    onProgress?.(40, `[4/7] 正在验证 ${mergedRows.length} 行合并数据...`);
+
+    // 创建验证器并验证
+    const validator = new RowValidator(template.fieldMappings);
+    const errors: ValidationError[] = [];
+
+    let processedRows = 0;
+    for (const row of mergedRows) {
+      if (this.isCancelled) throw new Error("验证已取消");
+
+      // 验证单行
+      const rowErrors = validator.validateRow(row.rowIndex, row.data, template.validationRules);
+
+      // 为每个错误添加来源信息
+      for (const err of rowErrors) {
+        errors.push({
+          ...err,
+          sourceFile: row.sourceFile,
+          sourceFileName: row.sourceFileName,
+        });
+      }
+
+      // 问卷回答验证
+      if (brandName && (taskName === "消费者调研" || taskName === "患者调研")) {
+        const { validateRowAnswers } = await import("./questionnaire-validator");
+        const answerErrors = validateRowAnswers(
+          file1Data.headerRow.map((h) => h?.toString() || ""),
+          row.rawArray,
+          row.rowIndex,
+          brandName,
+          taskName
+        );
+        for (const aError of answerErrors) {
+          errors.push({
+            row: aError.row,
+            column: `第${aError.questionNumber}题`,
+            field: "问卷回答",
+            value: aError.actualAnswer,
+            message: `${aError.message}\n有效选项: ${aError.expectedOptions}\n实际回答: ${aError.actualAnswer}`,
+            errorType: "answerValidation",
+            sourceFile: row.sourceFile,
+            sourceFileName: row.sourceFileName,
+          });
+        }
+      }
+
+      validator.addRowData(row.rowIndex, row.data);
+      processedRows++;
+
+      if (processedRows % 50 === 0) {
+        const progress = 40 + (processedRows / mergedRows.length) * 20;
+        onProgress?.(progress, `[4/7] 已验证 ${processedRows}/${mergedRows.length} 行...`);
+      }
+    }
+
+    onProgress?.(60, "[5/7] 正在执行跨行验证...");
+
+    // 跨行验证
+    const crossRowErrors = validator.validateCrossRows(template.validationRules);
+    errors.push(...crossRowErrors);
+
+    // 图片验证（可选）
+    let imageErrors: ImageValidationError[] = [];
+    let imageStats = {
+      totalImages: 0,
+      blurryImages: 0,
+      duplicateImages: 0,
+      suspiciousImages: 0,
+      seasonMismatchImages: 0,
+      borderImages: 0,
+    };
+
+    if (!template.skipImageValidation) {
+      onProgress?.(70, "[6/7] 正在验证图片...");
+
+      // 验证两个文件的图片
+      try {
+        const imageResults1 = await this.validateImages(
+          filePath1,
+          validateAllImages ? undefined : file1Data.sheetUsed,
+          undefined,
+          enableModelCapabilities
+        );
+
+        // 为图片错误添加来源标识
+        for (const err of imageResults1.errors) {
+          imageErrors.push({
+            ...err,
+            sourceFile: 'file1',
+            sourceFileName: fileName1,
+          });
+        }
+
+        const imageResults2 = await this.validateImages(
+          filePath2,
+          validateAllImages ? undefined : file2Data.sheetUsed,
+          undefined,
+          enableModelCapabilities
+        );
+
+        for (const err of imageResults2.errors) {
+          imageErrors.push({
+            ...err,
+            sourceFile: 'file2',
+            sourceFileName: fileName2,
+          });
+        }
+
+        // 合并统计
+        imageStats.totalImages = imageResults1.stats.totalImages + imageResults2.stats.totalImages;
+        imageStats.blurryImages = imageResults1.stats.blurryImages + imageResults2.stats.blurryImages;
+        imageStats.duplicateImages = imageResults1.stats.duplicateImages + imageResults2.stats.duplicateImages;
+        imageStats.suspiciousImages = imageResults1.stats.suspiciousImages + imageResults2.stats.suspiciousImages;
+        imageStats.seasonMismatchImages = imageResults1.stats.seasonMismatchImages + imageResults2.stats.seasonMismatchImages;
+        imageStats.borderImages = imageResults1.stats.borderImages + imageResults2.stats.borderImages;
+      } catch (error) {
+        console.error("❌ [合并验证] 图片验证失败:", error);
+      }
+    }
+
+    onProgress?.(95, "[7/7] 正在生成验证报告...");
+
+    // 按行号排序
+    errors.sort((a, b) => a.row - b.row);
+
+    const totalRows = mergedRows.length;
+
+    console.log("📝 [合并验证汇总]", {
+      totalRows,
+      dataErrors: errors.length,
+      imageErrors: imageErrors.length,
+      file1Rows: file1Data.rows.length,
+      file2Rows: file2Data.rows.length,
+    });
+
+    onProgress?.(100, "✅ 合并验证完成");
+
+    return {
+      isValid: errors.length === 0 && imageErrors.length === 0,
+      errors,
+      imageErrors,
+      summary: {
+        totalRows,
+        validRows: totalRows - new Set(errors.map((e) => e.row)).size,
+        errorCount: errors.length,
+        imageStats,
+      },
+      usedSheetName: `${file1Data.sheetUsed} + ${file2Data.sheetUsed}`,
+    };
+  }
 }

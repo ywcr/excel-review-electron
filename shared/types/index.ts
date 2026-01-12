@@ -10,6 +10,10 @@ export interface ValidationError {
   value?: any;
   message: string;
   errorType: string;
+  /** 合并验证时标识错误来源 */
+  sourceFile?: 'file1' | 'file2';
+  /** 来源文件名 */
+  sourceFileName?: string;
 }
 
 export interface ImageValidationError {
@@ -17,6 +21,10 @@ export interface ImageValidationError {
   column?: string;
   field?: string;
   imageIndex: number;
+  /** 合并验证时标识错误来源 */
+  sourceFile?: 'file1' | 'file2';
+  /** 来源文件名 */
+  sourceFileName?: string;
   errorType: "blur" | "duplicate" | "suspicious" | "seasonMismatch" | "border" | "objectDuplicate";
   message: string;
   details?: {
@@ -153,6 +161,16 @@ declare global {
         brandName?: string
       ) => Promise<ValidationResult>;
       cancelValidation: () => Promise<boolean>;
+      validateMergedExcel: (
+        filePath1: string,
+        filePath2: string,
+        taskName: string,
+        sheetName1?: string,
+        sheetName2?: string,
+        validateAllImages?: boolean,
+        enableModelCapabilities?: boolean,
+        brandName?: string
+      ) => Promise<ValidationResult>;
       exportValidationResult: (
         filePath: string,
         taskName: string,

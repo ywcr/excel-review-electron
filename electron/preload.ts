@@ -24,6 +24,29 @@ const electronAPI = {
   // 取消验证
   cancelValidation: () => ipcRenderer.invoke("cancel-validation"),
 
+  // 合并验证两个 Excel 文件
+  validateMergedExcel: (
+    filePath1: string,
+    filePath2: string,
+    taskName: string,
+    sheetName1?: string,
+    sheetName2?: string,
+    validateAllImages?: boolean,
+    enableModelCapabilities?: boolean,
+    brandName?: string
+  ) =>
+    ipcRenderer.invoke(
+      "validate-merged-excel",
+      filePath1,
+      filePath2,
+      taskName,
+      sheetName1,
+      sheetName2,
+      validateAllImages,
+      enableModelCapabilities,
+      brandName
+    ),
+
   // 导出验证结果
   exportValidationResult: (filePath: string, taskName: string, result: any) =>
     ipcRenderer.invoke("export-validation-result", filePath, taskName, result),
