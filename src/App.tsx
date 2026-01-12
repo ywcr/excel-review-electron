@@ -88,7 +88,7 @@ function AppContent() {
         {renderContent()}
       </AppLayout>
 
-      {/* AI 对话浮动按钮 */}
+      {/* AI 对话功能暂时隐藏 - 待优化后再启用
       <button 
         className="ai-fab" 
         onClick={openChat}
@@ -97,7 +97,6 @@ function AppContent() {
         🤖
       </button>
 
-      {/* AI 对话抽屉 */}
       <AIChatDrawer
         isOpen={isChatOpen}
         onClose={closeChat}
@@ -107,6 +106,7 @@ function AppContent() {
           setIsSettingsOpen(true);
         }}
       />
+      */}
 
       {/* LLM 设置模态框 */}
       {isSettingsOpen && (
