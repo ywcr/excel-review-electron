@@ -100,6 +100,20 @@ export interface ValidationResult {
   imageErrors?: ImageValidationError[];
   summary: ValidationSummary;
   usedSheetName?: string;
+  /** 合并验证统计 - 仅在合并验证模式下返回 */
+  mergeStats?: {
+    /** 所有名称的汇总统计 */
+    entities: Array<{
+      name: string;
+      address: string;
+      count: number;
+      sourceFiles: Array<'file1' | 'file2'>;
+    }>;
+    /** 总实体数（去重后） */
+    totalUniqueEntities: number;
+    /** 跨文件重复数 */
+    crossFileDuplicates: number;
+  };
 }
 
 export interface ValidationProgress {

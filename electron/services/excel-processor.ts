@@ -1077,6 +1077,71 @@ export class ExcelStreamProcessor {
     const crossRowErrors = validator.validateCrossRows(template.validationRules);
     errors.push(...crossRowErrors);
 
+    // ========== 跨文件重复检测 ==========
+    onProgress?.(65, "[5.5/7] 正在检测跨文件重复...");
+
+    // 清理字符串：只保留汉字、数字和字母
+    const cleanString = (str: string | undefined | null): string => {
+      if (!str) return '';
+      return String(str).replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '').toLowerCase();
+    };
+
+    // 根据任务类型确定名称和地址字段
+    const isPharmacy = taskName === "药店拜访";
+    const nameField = isPharmacy ? 'retailChannel' : 'hospitalName';
+    const addressField = 'channelAddress';
+
+    // 构建唯一标识符的函数
+    const buildKey = (row: { data: Record<string, any> }): string => {
+      const name = cleanString(row.data[nameField] || row.data['零售渠道'] || row.data['医疗机构名称']);
+      const addr = cleanString(row.data[addressField] || row.data['渠道地址']);
+      return `${name}__${addr}`;
+    };
+
+    // 按来源分组
+    const file1Rows = mergedRows.filter(r => r.sourceFile === 'file1');
+    const file2Rows = mergedRows.filter(r => r.sourceFile === 'file2');
+
+    // 构建文件1的索引 Map<key, { rowIndex, name, address }>
+    const file1Index = new Map<string, { rowIndex: number; name: string; address: string }>();
+    for (const row of file1Rows) {
+      const key = buildKey(row);
+      if (key && key !== '__') {
+        const name = String(row.data[nameField] || row.data['零售渠道'] || row.data['医疗机构名称'] || '');
+        const addr = String(row.data[addressField] || row.data['渠道地址'] || '');
+        file1Index.set(key, { rowIndex: row.rowIndex, name, address: addr });
+      }
+    }
+
+    // 遍历文件2，检查是否有重复
+    let crossFileDuplicates = 0;
+    for (const row of file2Rows) {
+      const key = buildKey(row);
+      if (key && key !== '__' && file1Index.has(key)) {
+        const file1Match = file1Index.get(key)!;
+        const name = String(row.data[nameField] || row.data['零售渠道'] || row.data['医疗机构名称'] || '');
+        const addr = String(row.data[addressField] || row.data['渠道地址'] || '');
+        const targetLabel = isPharmacy ? '药店' : '医院/机构';
+
+        errors.push({
+          row: row.rowIndex,
+          field: isPharmacy ? '零售渠道' : '医疗机构名称',
+          value: name,
+          message: `跨文件重复：该${targetLabel}在文件A第${file1Match.rowIndex}行已存在\n名称: ${name}\n地址: ${addr}`,
+          errorType: 'crossFileDuplicate',
+          sourceFile: row.sourceFile,
+          sourceFileName: row.sourceFileName,
+        });
+        crossFileDuplicates++;
+      }
+    }
+
+    if (crossFileDuplicates > 0) {
+      console.log(`⚠️ [跨文件重复检测] 发现 ${crossFileDuplicates} 个重复项`);
+    } else {
+      console.log("✅ [跨文件重复检测] 未发现重复项");
+    }
+
     // 图片验证（可选）
     let imageErrors: ImageValidationError[] = [];
     let imageStats = {
@@ -1143,12 +1208,50 @@ export class ExcelStreamProcessor {
 
     const totalRows = mergedRows.length;
 
+    // ========== 构建实体汇总统计 ==========
+    const entityMap = new Map<string, {
+      name: string;
+      address: string;
+      count: number;
+      sourceFiles: Set<'file1' | 'file2'>;
+    }>();
+
+    for (const row of mergedRows) {
+      const name = String(row.data[nameField] || row.data['零售渠道'] || row.data['医疗机构名称'] || '').trim();
+      const addr = String(row.data[addressField] || row.data['渠道地址'] || '').trim();
+      if (!name) continue;
+
+      const key = buildKey(row);
+      if (!entityMap.has(key)) {
+        entityMap.set(key, { name, address: addr, count: 0, sourceFiles: new Set() });
+      }
+      const entity = entityMap.get(key)!;
+      entity.count++;
+      entity.sourceFiles.add(row.sourceFile);
+    }
+
+    // 转换为数组并按数量排序
+    const mergeStats = {
+      entities: Array.from(entityMap.values())
+        .map(e => ({
+          name: e.name,
+          address: e.address,
+          count: e.count,
+          sourceFiles: Array.from(e.sourceFiles) as Array<'file1' | 'file2'>,
+        }))
+        .sort((a, b) => b.count - a.count),
+      totalUniqueEntities: entityMap.size,
+      crossFileDuplicates,
+    };
+
     console.log("📝 [合并验证汇总]", {
       totalRows,
       dataErrors: errors.length,
       imageErrors: imageErrors.length,
       file1Rows: file1Data.rows.length,
       file2Rows: file2Data.rows.length,
+      uniqueEntities: mergeStats.totalUniqueEntities,
+      crossFileDuplicates: mergeStats.crossFileDuplicates,
     });
 
     onProgress?.(100, "✅ 合并验证完成");
@@ -1164,6 +1267,7 @@ export class ExcelStreamProcessor {
         imageStats,
       },
       usedSheetName: `${file1Data.sheetUsed} + ${file2Data.sheetUsed}`,
+      mergeStats,
     };
   }
 }

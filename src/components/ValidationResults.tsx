@@ -27,6 +27,7 @@ const ERROR_TYPE_LABELS: Record<string, string> = {
   prohibitedContent: "禁用内容",
   sameImplementer: "同一人拜访",
   medicalLevel: "医疗类型错误",
+  crossFileDuplicate: "跨文件重复",
 };
 
 const IMAGE_ERROR_TYPE_LABELS: Record<string, string> = {
@@ -326,6 +327,75 @@ export function ValidationResults({
                 </p>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 合并验证汇总面板 - 仅在合并模式下显示 */}
+      {isMergeMode && result.mergeStats && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-zinc-900">
+              🏪 {taskName === '药店拜访' ? '药店' : '医院/机构'}汇总统计
+            </h3>
+            <div className="flex items-center gap-4 text-xs">
+              <span className="text-zinc-500">
+                去重后共 <span className="font-bold text-zinc-900">{result.mergeStats.totalUniqueEntities}</span> 个
+              </span>
+              {result.mergeStats.crossFileDuplicates > 0 && (
+                <span className="text-amber-600 font-medium">
+                  跨文件重复: {result.mergeStats.crossFileDuplicates}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="overflow-x-auto border border-zinc-200 rounded-lg">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-zinc-50">
+                  <th className="py-2 px-4 text-xs font-medium text-zinc-400 uppercase tracking-wider border-b border-zinc-200">#</th>
+                  <th className="py-2 px-4 text-xs font-medium text-zinc-400 uppercase tracking-wider border-b border-zinc-200">名称</th>
+                  <th className="py-2 px-4 text-xs font-medium text-zinc-400 uppercase tracking-wider border-b border-zinc-200">地址</th>
+                  <th className="py-2 px-4 text-xs font-medium text-zinc-400 uppercase tracking-wider border-b border-zinc-200 text-center">数量</th>
+                  <th className="py-2 px-4 text-xs font-medium text-zinc-400 uppercase tracking-wider border-b border-zinc-200 text-center">来源文件</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-100 text-sm">
+                {result.mergeStats.entities.slice(0, 50).map((entity, idx) => (
+                  <tr key={idx} className="hover:bg-zinc-50">
+                    <td className="py-2 px-4 text-zinc-400">{idx + 1}</td>
+                    <td className="py-2 px-4 text-zinc-900 font-medium max-w-[200px] truncate" title={entity.name}>
+                      {entity.name}
+                    </td>
+                    <td className="py-2 px-4 text-zinc-600 max-w-[300px] truncate" title={entity.address}>
+                      {entity.address || <span className="text-zinc-300">-</span>}
+                    </td>
+                    <td className="py-2 px-4 text-center">
+                      <span className={`inline-flex items-center justify-center px-2 py-0.5 rounded text-xs font-medium ${
+                        entity.count > 1 ? 'bg-amber-100 text-amber-700' : 'bg-zinc-100 text-zinc-600'
+                      }`}>
+                        {entity.count}
+                      </span>
+                    </td>
+                    <td className="py-2 px-4 text-center">
+                      <div className="flex justify-center gap-1">
+                        {entity.sourceFiles.includes('file1') && (
+                          <span className="px-1.5 py-0.5 text-[10px] font-medium bg-blue-50 text-blue-700 rounded">A</span>
+                        )}
+                        {entity.sourceFiles.includes('file2') && (
+                          <span className="px-1.5 py-0.5 text-[10px] font-medium bg-green-50 text-green-700 rounded">B</span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {result.mergeStats.entities.length > 50 && (
+              <div className="py-2 px-4 text-xs text-zinc-400 text-center bg-zinc-50 border-t border-zinc-200">
+                仅显示前 50 条，共 {result.mergeStats.entities.length} 条
+              </div>
+            )}
           </div>
         </div>
       )}
