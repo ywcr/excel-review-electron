@@ -2,7 +2,7 @@
  * 查找匹配类函数
  * VLOOKUP, HLOOKUP, INDEX, MATCH, XLOOKUP 等
  */
-import { ExcelFunction } from './types';
+import { ExcelFunction } from '../types';
 
 export const LOOKUP_FUNCTIONS: ExcelFunction[] = [
   {

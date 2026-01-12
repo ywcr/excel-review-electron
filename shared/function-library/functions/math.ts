@@ -2,7 +2,7 @@
  * 数学运算类函数
  * ROUND, ABS, INT, MOD, POWER, SQRT 等
  */
-import { ExcelFunction } from './types';
+import { ExcelFunction } from '../types';
 
 export const MATH_FUNCTIONS: ExcelFunction[] = [
   {

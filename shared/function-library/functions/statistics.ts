@@ -2,7 +2,7 @@
  * 统计汇总类函数
  * SUM, SUMIF, SUMIFS, AVERAGE, COUNT, COUNTIF 等
  */
-import { ExcelFunction } from './types';
+import { ExcelFunction } from '../types';
 
 export const STATISTICS_FUNCTIONS: ExcelFunction[] = [
   {

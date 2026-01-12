@@ -2,7 +2,7 @@
  * 文本处理类函数
  * LEFT, RIGHT, MID, LEN, TRIM, CONCATENATE, TEXT 等
  */
-import { ExcelFunction } from './types';
+import { ExcelFunction } from '../types';
 
 export const TEXT_FUNCTIONS: ExcelFunction[] = [
   {

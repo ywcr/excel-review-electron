@@ -2,7 +2,7 @@
  * 日期时间类函数
  * DATE, TODAY, NOW, YEAR, MONTH, DAY, DATEDIF 等
  */
-import { ExcelFunction } from './types';
+import { ExcelFunction } from '../types';
 
 export const DATE_FUNCTIONS: ExcelFunction[] = [
   {

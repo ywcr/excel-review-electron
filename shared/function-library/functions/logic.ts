@@ -2,7 +2,7 @@
  * 逻辑判断类函数
  * IF, IFS, AND, OR, NOT, IFERROR 等
  */
-import { ExcelFunction } from './types';
+import { ExcelFunction } from '../types';
 
 export const LOGIC_FUNCTIONS: ExcelFunction[] = [
   {
