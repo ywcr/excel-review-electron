@@ -13,6 +13,8 @@ interface DuplicateCompareModalProps {
     position: string;
     imageIndex: number;
   };
+  // 错误信息
+  errorMessage?: string;
   // 导航相关属性
   currentIndex?: number;
   totalCount?: number;
@@ -25,6 +27,7 @@ export function DuplicateCompareModal({
   onClose,
   leftImage,
   rightImage,
+  errorMessage,
   currentIndex = 0,
   totalCount = 1,
   onPrev,
@@ -180,9 +183,11 @@ export function DuplicateCompareModal({
         <div className="px-6 py-4 bg-amber-50 border-t border-amber-100">
           <p className="text-sm text-amber-800 flex items-center gap-2">
             <span>⚠️</span>
-            这两张图片被检测为重复。请核实是否为同一图片被重复提交。
+            <span className="flex-1">
+              {errorMessage || "这两张图片被检测为重复。请核实是否为同一图片被重复提交。"}
+            </span>
             {totalCount > 1 && (
-              <span className="ml-auto text-amber-600 text-xs">
+              <span className="text-amber-600 text-xs">
                 使用 ← → 键或点击按钮切换
               </span>
             )}

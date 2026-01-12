@@ -5,7 +5,7 @@
   "author": "ywcr",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "chcp 65001 && vite",
+    "dev": "vite",
     "build": "tsc && vite build && electron-builder",
     "preview": "vite preview",
     "build:mac": "npm run build && electron-builder --mac",

@@ -23,16 +23,16 @@ import type { Season, ClipDetectionResult } from "../../shared/types/detection";
 
 // 穿着季节检测 prompts（四季分类）
 // 注意：YOLO 已经检测了是否有人，所以不需要"无人"分类
-// v6 - 增强版本：进一步强化季节特征区分度
+// v7 - 优化版本：强调围巾作为冬季特征，区分春冬
 const CLOTHING_PROMPTS = [
-  // 冬季：强调极度厚重、臃肿膨胀、明显羽绒服特征
-  "person wearing extremely bulky thick quilted puffy down parka jacket with visible padding, bundled up tightly for freezing cold winter snow weather",
-  // 秋季：强调中等厚度层叠穿着、毛衣外套组合
-  "person wearing layered autumn outfit with wool sweater under medium weight coat or cardigan in cool fall weather",
+  // 冬季：强调围巾、厚外套、羽绒服、连帽外套
+  "person wearing winter clothing with scarf around neck, thick padded coat, down jacket, hooded parka, or heavy winter outerwear",
+  // 秋季：强调中等厚度层叠穿着、毛衣外套组合、无围巾
+  "person wearing layered autumn outfit with wool sweater under medium coat or cardigan, no scarf, in cool fall weather",
   // 夏季：强调极度轻薄、裸露手臂、短袖
   "person wearing minimal summer clothes with short sleeves, bare arms, tank top or thin t-shirt in hot sunny weather",
-  // 春季：强调单层轻便外套、薄风衣
-  "person wearing single layer light spring jacket or thin unpadded windbreaker in mild pleasant weather",
+  // 春季：强调单层轻便薄外套、无围巾、无羽绒服
+  "person wearing thin unpadded spring jacket or light windbreaker with no scarf and no thick padding",
 ];
 
 // 穿着季节对应关系
@@ -66,6 +66,10 @@ const SCENERY_SEASON_MAP: Record<number, Season> = {
 // 工装/制服检测 prompt（用于排除不反映季节的穿着）
 // 药店员工、保安、服务员等职业穿着不反映真实季节
 const UNIFORM_PROMPT = "person wearing work uniform, professional attire, staff clothing, or employee outfit";
+
+// 常绿植物检测 prompt（用于排除不反映季节的植物）
+// 冬青、松柏、室内盆栽等全年常绿，不能用于判断季节
+const EVERGREEN_PROMPT = "evergreen plants like holly, boxwood, pine, cypress, indoor potted plants, or artificial decorative plants that stay green year-round regardless of season";
 
 export class ClipDetector {
   private visualSession: OnnxRuntime.InferenceSession | null = null;
@@ -146,7 +150,9 @@ export class ClipDetector {
       ...CLOTHING_PROMPTS,
       ...SCENERY_PROMPTS,
       UNIFORM_PROMPT,
+      EVERGREEN_PROMPT,
     ];
+
 
     for (const prompt of allPrompts) {
       // 简化的文本编码（实际需要 CLIP 的 tokenizer）
@@ -204,10 +210,12 @@ export class ClipDetector {
    * 季节检测（精简版，只检测季节）
    * @param imageBuffer 图片 Buffer
    * @param yoloContext YOLO 检测上下文（可选，用于判断是否有人/植物）
+   * @param currentSeason 当前季节（可选，用于在分数接近时优先选择当前季节）
    */
   async detect(
     imageBuffer: Buffer,
-    yoloContext?: { hasPerson: boolean; hasPlant: boolean }
+    yoloContext?: { hasPerson: boolean; hasPlant: boolean; personAreaRatio?: number },
+    currentSeason?: Season
   ): Promise<ClipDetectionResult | null> {
     if (!this.isInitialized) {
       const success = await this.initialize();
@@ -231,8 +239,8 @@ export class ClipDetector {
         scores[text] = this.cosineSimilarity(imageEmbedding, textEmbedding);
       }
 
-      // 4. 解析季节检测结果
-      const result = this.parseSeasonScores(scores, yoloContext);
+      // 4. 解析季节检测结果（传入当前季节用于容差判断）
+      const result = this.parseSeasonScores(scores, yoloContext, currentSeason);
 
       // 调试日志
       clipLogger.info(`季节检测: ${result.detectedSeason} (置信度: ${result.seasonConfidence.toFixed(1)}%)`);
@@ -250,15 +258,23 @@ export class ClipDetector {
    * 解析季节分数（精简版）
    * @param scores CLIP 相似度分数
    * @param yoloContext YOLO 检测上下文（可选）
+   * @param currentSeason 当前季节（可选，用于在分数接近时优先选择当前季节）
    */
   private parseSeasonScores(
     scores: Record<string, number>,
-    yoloContext?: { hasPerson: boolean; hasPlant: boolean }
+    yoloContext?: { hasPerson: boolean; hasPlant: boolean; personAreaRatio?: number },
+    currentSeason?: Season
   ): ClipDetectionResult {
     const hasPerson = yoloContext?.hasPerson ?? false;
     const hasPlant = yoloContext?.hasPlant ?? false;
+    const personAreaRatio = yoloContext?.personAreaRatio ?? 0;
 
-    clipLogger.debug(`[上下文] 有人: ${hasPerson}, 有植物: ${hasPlant}`);
+    // 最小人物面积阈值（占图片面积的比例）
+    // 当人物太小时，CLIP 无法可靠识别穿着
+    const MIN_PERSON_AREA_RATIO = 0.05; // 5%
+    const personLargeEnough = personAreaRatio >= MIN_PERSON_AREA_RATIO;
+
+    clipLogger.debug(`[上下文] 有人: ${hasPerson}, 有植物: ${hasPlant}, 人物面积: ${(personAreaRatio * 100).toFixed(1)}%`);
 
     // ========== 1. 穿着季节检测（仅当有人时） ==========
     // 四季分类：冬季/秋季/夏季/春季
@@ -269,11 +285,13 @@ export class ClipDetector {
     
     // 相对比例阈值（最高分/次高分的比例）
     const CLOTHING_HIGH_RATIO = 1.12;     // 高置信度：高出 12%
-    const CLOTHING_MEDIUM_RATIO = 1.06;   // 中置信度：高出 6%（从 1.08 降低以提高判定率）
-    const CLOTHING_LOW_RATIO = 1.05;      // 低置信度：高出 5%
+    const CLOTHING_MEDIUM_RATIO = 1.08;   // 中置信度：高出 8%
+    const CLOTHING_LOW_RATIO = 1.06;      // 低置信度：高出 6%
     const CLOTHING_MIN_CONFIDENCE = 0.25; // 25% - 最低置信度要求
+    const CLOTHING_MIN_ABS_DIFF = 0.02;   // 2% - 最低绝对差距要求
+    const CURRENT_SEASON_TOLERANCE = 0.03; // 3% - 当前季节容差
 
-    if (hasPerson) {
+    if (hasPerson && personLargeEnough) {
       // 先检查是否穿工装（工装不反映季节）
       const uniformScore = scores[UNIFORM_PROMPT] || 0;
       const UNIFORM_THRESHOLD = 0.26; // 工装检测阈值
@@ -302,31 +320,49 @@ export class ClipDetector {
       const ratio = secondScore.score > 0 ? topScore.score / secondScore.score : 999;
       const margin = topScore.score - secondScore.score;
 
+      // 检查当前季节容差：如果最高分不是当前季节，但当前季节分数与最高分相差不超过 3%，则使用当前季节
+      let preferredSeason = topScore;
+      if (currentSeason && topScore.season !== currentSeason) {
+        const currentSeasonScore = clothingScores.find(s => s.season === currentSeason);
+        if (currentSeasonScore && (topScore.score - currentSeasonScore.score) <= CURRENT_SEASON_TOLERANCE) {
+          preferredSeason = currentSeasonScore;
+          clipLogger.info(`当前季节容差生效: ${topScore.label}(${(topScore.score * 100).toFixed(1)}%) vs ${currentSeasonScore.label}(${(currentSeasonScore.score * 100).toFixed(1)}%), 差距 ${((topScore.score - currentSeasonScore.score) * 100).toFixed(1)}% <= 3%, 优先选择当前季节`);
+        }
+      }
+
       // 使用相对比例判断置信度级别
-      if (topScore.score >= CLOTHING_MIN_CONFIDENCE) {
-        if (ratio >= CLOTHING_HIGH_RATIO) {
-          clothingSeason = topScore.season;
-          maxClothingScore = topScore.score;
-          clothingConfidenceLevel = 'high';
-          clipLogger.info(`穿着判定: ${topScore.label}, 置信度: ${(topScore.score * 100).toFixed(1)}%, 比例: ${ratio.toFixed(2)}x [高置信度]`);
-        } else if (ratio >= CLOTHING_MEDIUM_RATIO) {
-          clothingSeason = topScore.season;
-          maxClothingScore = topScore.score;
+      if (preferredSeason.score >= CLOTHING_MIN_CONFIDENCE) {
+        // 重新计算 ratio（如果使用了当前季节容差）
+        const effectiveRatio = preferredSeason === topScore ? ratio : 
+          (secondScore.score > 0 ? preferredSeason.score / secondScore.score : 999);
+        
+        if (effectiveRatio >= CLOTHING_HIGH_RATIO || (preferredSeason !== topScore)) {
+          // 如果是通过当前季节容差选中的，视为高置信度
+          clothingSeason = preferredSeason.season;
+          maxClothingScore = preferredSeason.score;
+          clothingConfidenceLevel = preferredSeason === topScore ? 'high' : 'medium';
+          clipLogger.info(`穿着判定: ${preferredSeason.label}, 置信度: ${(preferredSeason.score * 100).toFixed(1)}%, 比例: ${effectiveRatio.toFixed(2)}x [${preferredSeason === topScore ? '高置信度' : '当前季节容差'}]`);
+        } else if (effectiveRatio >= CLOTHING_MEDIUM_RATIO) {
+          clothingSeason = preferredSeason.season;
+          maxClothingScore = preferredSeason.score;
           clothingConfidenceLevel = 'medium';
-          clipLogger.info(`穿着判定: ${topScore.label}, 置信度: ${(topScore.score * 100).toFixed(1)}%, 比例: ${ratio.toFixed(2)}x [中置信度]`);
-        } else if (ratio >= CLOTHING_LOW_RATIO) {
-          clothingSeason = topScore.season;
-          maxClothingScore = topScore.score;
+          clipLogger.info(`穿着判定: ${preferredSeason.label}, 置信度: ${(preferredSeason.score * 100).toFixed(1)}%, 比例: ${effectiveRatio.toFixed(2)}x [中置信度]`);
+        } else if (effectiveRatio >= CLOTHING_LOW_RATIO) {
+          clothingSeason = preferredSeason.season;
+          maxClothingScore = preferredSeason.score;
           clothingConfidenceLevel = 'low';
-          clipLogger.info(`穿着判定: ${topScore.label}, 置信度: ${(topScore.score * 100).toFixed(1)}%, 比例: ${ratio.toFixed(2)}x [低置信度]`);
+          clipLogger.info(`穿着判定: ${preferredSeason.label}, 置信度: ${(preferredSeason.score * 100).toFixed(1)}%, 比例: ${effectiveRatio.toFixed(2)}x [低置信度]`);
         } else {
           // 分数差距太小，标记为不确定
-          clipLogger.debug(`穿着季节不确定 (比例: ${ratio.toFixed(2)}x < ${CLOTHING_LOW_RATIO}x, 差距: ${(margin * 100).toFixed(1)}%)`);
+          clipLogger.debug(`穿着季节不确定 (比例: ${effectiveRatio.toFixed(2)}x < ${CLOTHING_LOW_RATIO}x, 差距: ${(margin * 100).toFixed(1)}%)`);
         }
       } else {
-        clipLogger.debug(`穿着季节不确定 (最高置信度: ${(topScore.score * 100).toFixed(1)}% < ${(CLOTHING_MIN_CONFIDENCE * 100).toFixed(0)}%)`);
+        clipLogger.debug(`穿着季节不确定 (最高置信度: ${(preferredSeason.score * 100).toFixed(1)}% < ${(CLOTHING_MIN_CONFIDENCE * 100).toFixed(0)}%)`);
       }
       }
+    } else if (hasPerson && !personLargeEnough) {
+      // 人物太小，跳过穿着季节检测
+      clipLogger.info(`跳过穿着季节检测: 人物太小 (面积: ${(personAreaRatio * 100).toFixed(1)}% < ${(MIN_PERSON_AREA_RATIO * 100).toFixed(0)}%)`);
     }
 
     // ========== 2. 植物/场景季节检测（仅当有植物时） ==========
@@ -340,6 +376,8 @@ export class ClipDetector {
     const INDOOR_SHOP_PROMPT = "indoor shop, store, pharmacy, supermarket, or retail space with product shelves and merchandise";
 
     if (hasPlant) {
+      // 先检查是否是常绿植物（冬青、松柏等）
+      const evergreenScore = scores[EVERGREEN_PROMPT] || 0;
       // 先检查是否是室内商业场所（药店、商店等）
       const indoorShopScore = scores[INDOOR_SHOP_PROMPT] || 0;
       
@@ -353,9 +391,16 @@ export class ClipDetector {
       
       const maxSeasonSceneryScore = Math.max(...sceneryScores.map(s => s.score));
       
-      // 如果室内商业场所分数较高且没有人物，跳过场景季节检测
-      // 这是因为室内药店的盆栽植物不能反映真实季节
-      if (indoorShopScore > maxSeasonSceneryScore && !hasPerson) {
+      // 常绿植物检测阈值
+      const EVERGREEN_THRESHOLD = 0.24; // 24%
+      
+      // 如果检测到常绿植物（冬青、松柏等），跳过场景季节检测
+      if (evergreenScore >= EVERGREEN_THRESHOLD && evergreenScore > maxSeasonSceneryScore * 0.9) {
+        clipLogger.info(`检测到常绿植物 (${(evergreenScore * 100).toFixed(1)}%)，跳过场景季节检测（常绿植物全年保持绿色）`);
+        // scenerySeason 保持 undefined
+      } else if (indoorShopScore > maxSeasonSceneryScore && !hasPerson) {
+        // 如果室内商业场所分数较高且没有人物，跳过场景季节检测
+        // 这是因为室内药店的盆栽植物不能反映真实季节
         clipLogger.info(`跳过场景季节检测: 室内商业场所(${(indoorShopScore * 100).toFixed(1)}%)且无人物，植物可能是室内盆栽`);
         // scenerySeason 保持 undefined
       } else {

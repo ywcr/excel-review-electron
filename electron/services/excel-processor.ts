@@ -24,6 +24,15 @@ export class ExcelStreamProcessor {
     this.imageValidationService = new ImageValidationService();
   }
 
+  /**
+   * 取消当前验证
+   */
+  cancel() {
+    console.log("🛑 [取消验证] ExcelStreamProcessor.cancel() 被调用");
+    this.isCancelled = true;
+    this.imageValidationService.cancel();
+  }
+
   async validateFile(
     filePath: string,
     taskName: string,

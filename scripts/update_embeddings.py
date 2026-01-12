@@ -33,14 +33,16 @@ new_texts = [
     "urban city street scene with buildings, roads, sidewalks, and no trees or plants visible",
     "outdoor natural scene with trees, plants, grass, flowers, or green vegetation",
     "other scene or mixed environment",
-    # 穿着季节 prompts (v6 - 增强版本：进一步强化季节特征区分度)
-    "person wearing extremely bulky thick quilted puffy down parka jacket with visible padding, bundled up tightly for freezing cold winter snow weather",
-    "person wearing layered autumn outfit with wool sweater under medium weight coat or cardigan in cool fall weather",
+    # 穿着季节 prompts (v8 - 强调围巾区分冬春)
+    "person wearing winter clothing with scarf around neck, thick padded coat, down jacket, hooded parka, or heavy winter outerwear",
+    "person wearing layered autumn outfit with wool sweater under medium coat or cardigan, no scarf, in cool fall weather",
     "person wearing minimal summer clothes with short sleeves, bare arms, tank top or thin t-shirt in hot sunny weather",
-    "person wearing single layer light spring jacket or thin unpadded windbreaker in mild pleasant weather",
+    "person wearing thin unpadded spring jacket or light windbreaker with no scarf and no thick padding",
     "no person in the image",
     # 工装/制服检测 prompt（用于排除不反映季节的穿着）
     "person wearing work uniform, professional attire, staff clothing, or employee outfit",
+    # 常绿植物检测 prompt（用于排除不反映季节的植物）
+    "evergreen plants like holly, boxwood, pine, cypress, indoor potted plants, or artificial decorative plants that stay green year-round regardless of season",
 ]
 
 # 需要删除的旧提示词
@@ -67,6 +69,12 @@ old_texts_to_remove = [
     "person wearing wool sweater or medium weight jacket in cool autumn weather with layered outfit",
     "person wearing short sleeve t-shirt or tank top with bare arms in hot summer weather",
     "person wearing light spring cardigan or thin windbreaker in mild pleasant weather",
+    # v6 旧版冬季 prompt (需要删除)
+    "person wearing extremely bulky thick quilted puffy down parka jacket with visible padding, bundled up tightly for freezing cold winter snow weather",
+    # v7 旧版 prompts (需要删除)
+    "person wearing thick winter coat, down jacket, puffy parka, or padded jacket with scarf or wrapped up warmly for cold winter weather",
+    "person wearing layered autumn outfit with wool sweater under medium weight coat or cardigan in cool fall weather",
+    "person wearing single layer light spring jacket or thin unpadded windbreaker in mild pleasant weather",
 ]
 
 # 加载现有的嵌入

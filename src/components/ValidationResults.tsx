@@ -626,6 +626,7 @@ export function ValidationResults({
             position: compareImage.details.duplicateOfPosition || `图片 #${compareImage.details.duplicateOf}`,
             imageIndex: compareImage.details.duplicateOf || 0,
           }}
+          errorMessage={compareImage.message}
           currentIndex={compareIndex}
           totalCount={duplicateErrorsForCompare.length}
           onPrev={() => {

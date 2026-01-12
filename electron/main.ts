@@ -8,6 +8,7 @@ import { getFolderDuplicateDetector } from "./services/folder-duplicate-detector
 import type { ValidationResult } from "../shared/types";
 
 let mainWindow: BrowserWindow | null = null;
+let currentProcessor: ExcelStreamProcessor | null = null; // 用于取消验证
 
 const createWindow = () => {
   mainWindow = new BrowserWindow({
@@ -113,6 +114,7 @@ function registerIpcHandlers() {
       
       try {
         const processor = new ExcelStreamProcessor();
+        currentProcessor = processor; // 保存以便取消
 
         // 发送进度更新
         const progressCallback = (progress: number, message: string) => {
@@ -130,6 +132,8 @@ function registerIpcHandlers() {
           enableModelCapabilities,
           brandName
         );
+        
+        currentProcessor = null; // 清理
         
         const duration = Date.now() - startTime;
         console.log("-".repeat(60));
@@ -165,6 +169,7 @@ function registerIpcHandlers() {
         
         return result;
       } catch (error) {
+        currentProcessor = null; // 清理
         const duration = Date.now() - startTime;
         console.log("-".repeat(60));
         console.error("❌ [IPC] validate-excel 请求失败");
@@ -178,8 +183,15 @@ function registerIpcHandlers() {
 
   // 取消验证
   ipcMain.handle("cancel-validation", async () => {
-    // TODO: 实现取消逻辑
-    return true;
+    console.log("🛑 [IPC] cancel-validation 请求");
+    if (currentProcessor) {
+      currentProcessor.cancel();
+      currentProcessor = null;
+      console.log("🛑 [IPC] 已取消当前验证");
+      return true;
+    }
+    console.log("⚠️ [IPC] 没有正在进行的验证可取消");
+    return false;
   });
 
   // ========== 历史记录 IPC ==========

@@ -129,6 +129,13 @@ export class ImageValidationService {
             if (result.hasBorder) stats.borderImages++;
 
             completedCount++;
+            
+            // 每处理完一张图片检查是否已取消
+            if (this.isCancelled) {
+              console.log('🛑 [验证已取消] 跳过剩余图片');
+              return null;
+            }
+            
             if (completedCount % 10 === 0 || completedCount === images.length) {
               const analysisProgress = 84 + Math.floor((completedCount / images.length) * 11); // 84-95%
               onProgress?.(analysisProgress, `[5/6] 已验证 ${completedCount}/${images.length} 张图片`);
@@ -148,6 +155,11 @@ export class ImageValidationService {
       });
 
       const processedResults = await Promise.all(validationPromises);
+
+      // 检查是否已取消
+      if (this.isCancelled) {
+        throw new Error("Validation cancelled");
+      }
 
       // 过滤 null
       processedResults.forEach(r => {

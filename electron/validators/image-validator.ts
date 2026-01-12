@@ -134,6 +134,7 @@ export class ImageValidator {
 
       // 2. 多人物融合检测：对多个人物分别检测，使用投票机制确定最终季节
       const clipDetector = getClipDetector();
+      const currentSeason = SeasonValidator.getCurrentSeason(); // 用于 3% 容差判断
       let finalClipResult: Awaited<ReturnType<typeof clipDetector.detect>> = null;
 
       if (hasPerson) {
@@ -145,18 +146,28 @@ export class ImageValidator {
         }).slice(0, 3);
 
         if (sortedPersons.length === 1) {
-          // 单人：直接裁剪检测（无论人物大小，只要检测到就裁剪）
+          // 单人：检查人物面积是否足够大
           const person = sortedPersons[0];
           const areaRatio = (person.bbox.width * person.bbox.height) / (metadata.width * metadata.height) * 100;
+          
+          // 最小人物面积阈值（原始图片中的占比）
+          // 如果人物太小，裁剪后的图片质量太差，无法可靠检测
+          const MIN_CROP_AREA_PERCENT = 3.0; // 3%
+          
+          if (areaRatio < MIN_CROP_AREA_PERCENT) {
+            validationLogger.info(`[图片 #${imageIndex}] 人物面积太小 (${areaRatio.toFixed(1)}% < ${MIN_CROP_AREA_PERCENT}%)，跳过季节检测`);
+            return defaultResult;
+          }
           
           try {
             const croppedBuffer = await yoloDetector.cropObject(imageBuffer, person, 0.15);
             validationLogger.info(`[图片 #${imageIndex}] 已裁剪人物区域 (占比: ${areaRatio.toFixed(1)}%)`);
-            finalClipResult = await clipDetector.detect(croppedBuffer, { hasPerson, hasPlant });
+            // 裁剪后人物占满区域，设置 personAreaRatio 为 1.0
+            finalClipResult = await clipDetector.detect(croppedBuffer, { hasPerson, hasPlant, personAreaRatio: 1.0 }, currentSeason);
           } catch {
-            // 裁剪失败时使用原始图片
+            // 裁剪失败时使用原始图片，传递原始面积比例
             validationLogger.warn(`[图片 #${imageIndex}] 人物区域裁剪失败，使用原始图片`);
-            finalClipResult = await clipDetector.detect(imageBuffer, { hasPerson, hasPlant });
+            finalClipResult = await clipDetector.detect(imageBuffer, { hasPerson, hasPlant, personAreaRatio: areaRatio / 100 }, currentSeason);
           }
         } else {
           // 多人：分别检测后投票
@@ -167,7 +178,8 @@ export class ImageValidator {
             const person = sortedPersons[i];
             try {
               const croppedBuffer = await yoloDetector.cropObject(imageBuffer, person, 0.15);
-              const result = await clipDetector.detect(croppedBuffer, { hasPerson: true, hasPlant: false });
+              // 裁剪后人物占满区域
+              const result = await clipDetector.detect(croppedBuffer, { hasPerson: true, hasPlant: false, personAreaRatio: 1.0 }, currentSeason);
               
               if (result && result.detectedSeason !== "unknown") {
                 const season = result.detectedSeason;
@@ -183,28 +195,66 @@ export class ImageValidator {
             }
           }
 
-          // 投票结果：选择票数最多的季节，票数相同时选择平均分数最高的
+          // 检查是否有人被检测为当前季节（只要有一个人符合就通过）
+          const hasCurrentSeasonMatch = Object.keys(seasonVotes).includes(currentSeason);
+          
+          // 投票结果排序备用
           const sortedVotes = Object.entries(seasonVotes).sort((a, b) => {
             if (b[1].count !== a[1].count) return b[1].count - a[1].count;
             return (b[1].totalScore / b[1].count) - (a[1].totalScore / a[1].count);
           });
-
-          if (sortedVotes.length > 0) {
-            const [winnerSeason, winnerData] = sortedVotes[0];
-            const avgConfidence = winnerData.totalScore / winnerData.count;
-            validationLogger.info(`[图片 #${imageIndex}] 投票结果: ${winnerSeason} (票数: ${winnerData.count}/${sortedPersons.length}, 平均置信度: ${avgConfidence.toFixed(1)}%)`);
+          
+          if (hasCurrentSeasonMatch) {
+            // 有人被检测为当前季节，直接使用当前季节
+            const matchData = seasonVotes[currentSeason];
+            const avgConfidence = matchData.totalScore / matchData.count;
+            validationLogger.info(`[图片 #${imageIndex}] ✓ 检测到当前季节(${currentSeason}): ${matchData.count}/${sortedPersons.length}人, 平均置信度: ${avgConfidence.toFixed(1)}%`);
             
             finalClipResult = {
-              detectedSeason: winnerSeason as Season,
+              detectedSeason: currentSeason,
               seasonConfidence: avgConfidence,
-              clothingSeason: winnerSeason as Season,
+              clothingSeason: currentSeason,
               hasPerson: true,
               hasPlant,
               rawScores: {},
             };
+          } else if (sortedVotes.length > 0) {
+            // 没有人匹配当前季节，使用投票最多的季节
+            const [winnerSeason, winnerData] = sortedVotes[0];
+            const avgConfidence = winnerData.totalScore / winnerData.count;
+            const voteRatio = winnerData.count / sortedPersons.length;
+            
+            validationLogger.info(`[图片 #${imageIndex}] 投票结果: ${winnerSeason} (票数: ${winnerData.count}/${sortedPersons.length}, 平均置信度: ${avgConfidence.toFixed(1)}%)`);
+            
+            // 弱投票检测：如果投票人数不到一半，且置信度较低，视为不确定
+            // 这样可以避免只有 1/3 人投票且置信度低时做出错误判断
+            const isWeakVote = voteRatio < 0.5 && avgConfidence < 28;
+            
+            if (isWeakVote) {
+              validationLogger.info(`[图片 #${imageIndex}] 投票信号较弱 (${winnerData.count}/${sortedPersons.length}人, ${avgConfidence.toFixed(1)}% < 28%)，视为不确定`);
+              finalClipResult = {
+                detectedSeason: "unknown" as Season,
+                seasonConfidence: 0,
+                clothingSeason: undefined,
+                hasPerson: true,
+                hasPlant,
+                rawScores: {},
+              };
+            } else {
+              finalClipResult = {
+                detectedSeason: winnerSeason as Season,
+                seasonConfidence: avgConfidence,
+                clothingSeason: winnerSeason as Season,
+                hasPerson: true,
+                hasPlant,
+                rawScores: {},
+              };
+            }
           } else {
-            // 所有投票都失败，使用原图检测
-            finalClipResult = await clipDetector.detect(imageBuffer, { hasPerson, hasPlant });
+            // 所有投票都失败，使用原图检测（传递最大人物的面积比例）
+            const maxPersonArea = sortedPersons[0].bbox.width * sortedPersons[0].bbox.height;
+            const maxPersonAreaRatio = maxPersonArea / (metadata.width * metadata.height);
+            finalClipResult = await clipDetector.detect(imageBuffer, { hasPerson, hasPlant, personAreaRatio: maxPersonAreaRatio }, currentSeason);
           }
         }
       } else {
@@ -225,15 +275,15 @@ export class ImageValidator {
           try {
             const croppedBuffer = await yoloDetector.cropObject(imageBuffer, plant, 0.2);
             validationLogger.info(`[图片 #${imageIndex}] 已裁剪植物区域 (占比: ${areaRatio.toFixed(1)}%)`);
-            finalClipResult = await clipDetector.detect(croppedBuffer, { hasPerson: false, hasPlant: true });
+            finalClipResult = await clipDetector.detect(croppedBuffer, { hasPerson: false, hasPlant: true }, currentSeason);
           } catch {
             // 裁剪失败时使用原始图片
             validationLogger.warn(`[图片 #${imageIndex}] 植物区域裁剪失败，使用原始图片`);
-            finalClipResult = await clipDetector.detect(imageBuffer, { hasPerson: false, hasPlant });
+            finalClipResult = await clipDetector.detect(imageBuffer, { hasPerson: false, hasPlant }, currentSeason);
           }
         } else {
           // 无法获取植物检测结果，使用原图
-          finalClipResult = await clipDetector.detect(imageBuffer, { hasPerson: false, hasPlant });
+          finalClipResult = await clipDetector.detect(imageBuffer, { hasPerson: false, hasPlant }, currentSeason);
         }
       }
 
@@ -245,7 +295,7 @@ export class ImageValidator {
       // 4. 验证季节是否符合当前月份
       const seasonValidation = SeasonValidator.validate(finalClipResult);
 
-      validationLogger.debug(`[图片 #${imageIndex}] 季节检测结果: ${finalClipResult.detectedSeason}, 匹配=${seasonValidation.matchesCurrent}`);
+      validationLogger.info(`[图片 #${imageIndex}] 最终结果: 季节=${finalClipResult.detectedSeason}, 穿着=${finalClipResult.clothingSeason || '无'}, 匹配当前=${seasonValidation.matchesCurrent}`);
 
       return {
         detectedSeason: finalClipResult.detectedSeason,

@@ -4,6 +4,7 @@
  */
 import { useState, useCallback, useEffect } from 'react';
 import { ExcelFunction } from '../../../shared/function-library';
+import { executeFormula as executeFormulaFn, getSupportedFunctions } from './formula-executor';
 
 interface FormulaLabProps {
   initialFunction?: ExcelFunction | null;
@@ -75,137 +76,10 @@ export function FormulaLab({ initialFunction, initialFormula, onBack }: FormulaL
     setResult(null);
   };
 
-  // 执行公式（简化版本，实际应调用后端）
-  const executeFormula = () => {
-    const formulaUpper = formula.toUpperCase().trim();
-    
-    // 简单的公式解析和执行
-    try {
-      // 解析 VLOOKUP
-      const vlookupMatch = formulaUpper.match(/=VLOOKUP\s*\(\s*"([^"]+)"\s*,\s*([A-Z]\d+):([A-Z]\d+)\s*,\s*(\d+)\s*,\s*(TRUE|FALSE)\s*\)/i);
-      
-      if (vlookupMatch) {
-        const lookupValue = vlookupMatch[1];
-        const colIndex = parseInt(vlookupMatch[4]) - 1;
-        
-        // 在第一列查找
-        for (let i = 0; i < data.length; i++) {
-          if (data[i][0]?.value === lookupValue) {
-            const resultValue = data[i][colIndex]?.value || '';
-            setResult({
-              success: true,
-              value: resultValue,
-              steps: [
-                `在 A 列中查找 "${lookupValue}"`,
-                `找到匹配项在第 ${i + 1} 行`,
-                `返回该行第 ${colIndex + 1} 列的值: ${resultValue}`,
-              ],
-            });
-            return;
-          }
-        }
-        
-        setResult({
-          success: false,
-          error: '#N/A',
-          steps: [
-            `在 A 列中查找 "${lookupValue}"`,
-            `未找到匹配项`,
-          ],
-        });
-        return;
-      }
-
-      // 解析 SUM
-      const sumMatch = formulaUpper.match(/=SUM\s*\(\s*([A-Z])(\d+):([A-Z])(\d+)\s*\)/i);
-      
-      if (sumMatch) {
-        const startCol = sumMatch[1].charCodeAt(0) - 65;
-        const startRow = parseInt(sumMatch[2]) - 1;
-        const endCol = sumMatch[3].charCodeAt(0) - 65;
-        const endRow = parseInt(sumMatch[4]) - 1;
-        
-        let sum = 0;
-        const values: number[] = [];
-        
-        for (let r = startRow; r <= endRow; r++) {
-          for (let c = startCol; c <= endCol; c++) {
-            const val = parseFloat(data[r]?.[c]?.value || '0');
-            if (!isNaN(val)) {
-              sum += val;
-              values.push(val);
-            }
-          }
-        }
-        
-        setResult({
-          success: true,
-          value: sum.toString(),
-          steps: [
-            `提取区域 ${sumMatch[1]}${sumMatch[2]}:${sumMatch[3]}${sumMatch[4]} 的数值`,
-            `数值列表: ${values.join(', ') || '(无数值)'}`,
-            `计算总和: ${sum}`,
-          ],
-        });
-        return;
-      }
-
-      // 解析 IF
-      const ifMatch = formula.match(/=IF\s*\(\s*([^,]+)\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\)/i);
-      
-      if (ifMatch) {
-        const condition = ifMatch[1];
-        const trueValue = ifMatch[2];
-        const falseValue = ifMatch[3];
-        
-        // 简单条件解析 (如 A2>=60)
-        const condMatch = condition.match(/([A-Z])(\d+)\s*(>=|<=|>|<|=)\s*(\d+)/i);
-        if (condMatch) {
-          const col = condMatch[1].charCodeAt(0) - 65;
-          const row = parseInt(condMatch[2]) - 1;
-          const operator = condMatch[3];
-          const compareValue = parseFloat(condMatch[4]);
-          const cellValue = parseFloat(data[row]?.[col]?.value || '0');
-          
-          let conditionResult = false;
-          switch (operator) {
-            case '>=': conditionResult = cellValue >= compareValue; break;
-            case '<=': conditionResult = cellValue <= compareValue; break;
-            case '>': conditionResult = cellValue > compareValue; break;
-            case '<': conditionResult = cellValue < compareValue; break;
-            case '=': conditionResult = cellValue === compareValue; break;
-          }
-          
-          setResult({
-            success: true,
-            value: conditionResult ? trueValue : falseValue,
-            steps: [
-              `读取 ${condMatch[1]}${condMatch[2]} 的值: ${cellValue}`,
-              `判断条件: ${cellValue} ${operator} ${compareValue} = ${conditionResult ? 'TRUE' : 'FALSE'}`,
-              `返回${conditionResult ? '真' : '假'}值: "${conditionResult ? trueValue : falseValue}"`,
-            ],
-          });
-          return;
-        }
-      }
-
-      // 未识别的公式
-      setResult({
-        success: false,
-        error: '暂不支持此公式的模拟执行',
-        steps: [
-          '提示：目前实验室支持 VLOOKUP、SUM、IF 基础格式',
-          '完整功能需要实际 Excel 环境执行',
-        ],
-      });
-
-    } catch (err) {
-      setResult({
-        success: false,
-        error: '公式解析错误',
-        steps: ['请检查公式格式是否正确'],
-      });
-    }
+  // 执行公式
+  const handleExecuteFormula = () => {
+    const result = executeFormulaFn(formula, data);
+    setResult(result);
   };
 
   // 复制公式
@@ -279,7 +153,7 @@ export function FormulaLab({ initialFunction, initialFormula, onBack }: FormulaL
             placeholder='输入公式，如 =VLOOKUP("张三", A1:C4, 3, FALSE)'
           />
           <div className="fl-formula-actions">
-            <button className="fl-execute-btn" onClick={executeFormula}>
+            <button className="fl-execute-btn" onClick={handleExecuteFormula}>
               ▶ 执行
             </button>
           </div>
