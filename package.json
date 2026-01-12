@@ -17,6 +17,7 @@
     "electron-store": "^8.2.0",
     "electron-updater": "^6.1.7",
     "exceljs": "^4.4.0",
+    "setimmediate": "^1.0.5",
     "jszip": "^3.10.1",
     "onnxruntime-node": "^1.23.2",
     "p-limit": "^7.2.0",
