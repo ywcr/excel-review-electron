@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from "react";
 import { ValidationResults } from "./ValidationResults";
 import { ValidationRequirements } from "./ValidationRequirements";
 import { useValidationSettings } from "../hooks/useValidationSettings";
+import { useLiteVersion } from "../hooks/useLiteVersion";
 import { GhostButton, OutlineButton } from "./UI/Buttons";
 import { AddTaskModal } from "./UI/AddTaskModal";
 import { 
@@ -65,6 +66,9 @@ export function BatchValidation({
     setValidateAllImages,
     setEnableModelCapabilities,
   } = useValidationSettings();
+
+  // 检测是否为轻量版（隐藏模型能力开关）
+  const { isLite } = useLiteVersion();
 
   // 处理添加文件的通用函数
   const addFiles = useCallback((filePaths: string[]) => {
@@ -402,20 +406,22 @@ export function BatchValidation({
             </span>
           </label>
           
-          {/* 开启模型能力选项 */}
-          <label className="flex items-center gap-2 cursor-pointer group">
-            <input
-              type="checkbox"
-              checked={enableModelCapabilities}
-              onChange={(e) => setEnableModelCapabilities(e.target.checked)}
-              disabled={isValidating}
-              className="w-4 h-4 rounded border-zinc-300 text-black focus:ring-black disabled:opacity-50"
-            />
-            <span className="text-sm text-zinc-600 group-hover:text-zinc-900 transition-colors">
-              开启模型能力
-              <span className="text-xs text-zinc-400 ml-1">(季节检测、物体重复检测)</span>
-            </span>
-          </label>
+          {/* 开启模型能力选项 - 轻量版隐藏 */}
+          {!isLite && (
+            <label className="flex items-center gap-2 cursor-pointer group">
+              <input
+                type="checkbox"
+                checked={enableModelCapabilities}
+                onChange={(e) => setEnableModelCapabilities(e.target.checked)}
+                disabled={isValidating}
+                className="w-4 h-4 rounded border-zinc-300 text-black focus:ring-black disabled:opacity-50"
+              />
+              <span className="text-sm text-zinc-600 group-hover:text-zinc-900 transition-colors">
+                开启模型能力
+                <span className="text-xs text-zinc-400 ml-1">(季节检测、物体重复检测)</span>
+              </span>
+            </label>
+          )}
         </div>
       </section>
 

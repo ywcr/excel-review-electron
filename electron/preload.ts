@@ -97,6 +97,9 @@ const electronAPI = {
   removeProgressListener: () => {
     ipcRenderer.removeAllListeners("validation-progress");
   },
+
+  // 检测是否为轻量版
+  isLiteVersion: () => ipcRenderer.invoke("is-lite-version"),
 };
 
 contextBridge.exposeInMainWorld("electron", electronAPI);

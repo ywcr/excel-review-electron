@@ -50,6 +50,7 @@ export class ImageValidator {
   public imageProcessor: ImageProcessor;
   private imageHashes: Map<number, string> = new Map(); // 存储已处理图片的哈希（十六进制格式）
   private imagePositions: Map<number, string> = new Map(); // 存储图片位置映射
+  private imageBuffers: Map<number, Buffer> = new Map(); // 存储图片 Buffer（用于 SSIM 二次确认）
 
   // === 使用与 PC Worker 完全同步的配置 ===
   // 来源: electron/config/image-validation-config.ts
@@ -58,6 +59,7 @@ export class ImageValidator {
   private readonly NEAR_THRESHOLD_MARGIN =
     IMAGE_DUP_CONFIG.NEAR_THRESHOLD_MARGIN;
   private readonly BLOCKHASH_BITS = IMAGE_DUP_CONFIG.BLOCKHASH_BITS;
+  private readonly SSIM_THRESHOLD = IMAGE_DUP_CONFIG.SSIM_STRICT; // SSIM 二次确认阈值
 
   constructor() {
     this.imageProcessor = new ImageProcessor();
@@ -401,7 +403,8 @@ export class ImageValidator {
     this.imageHashes.set(imageIndex, hash);
 
     // 4. 检测重复（使用与 PC Worker 一致的十六进制汉明距离）
-    const duplicateResult = this.checkDuplicate(hash, imageIndex);
+    this.storeImageBuffer(imageIndex, imageBuffer); // 存储用于 SSIM 二次确认
+    const duplicateResult = await this.checkDuplicate(hash, imageIndex, imageBuffer);
 
     // 5. 边框检测
     const borderResult = await this.imageProcessor.detectBorder(imageBuffer);
@@ -486,7 +489,8 @@ export class ImageValidator {
     const isBlurry = blurScore < this.BLUR_THRESHOLD;
 
     // 3. 检测重复（使用预计算的哈希）
-    const duplicateResult = this.checkDuplicate(precomputedHash, imageIndex);
+    this.storeImageBuffer(imageIndex, imageBuffer); // 存储用于 SSIM 二次确认
+    const duplicateResult = await this.checkDuplicate(precomputedHash, imageIndex, imageBuffer);
 
     // 4. 季节检测 - 使用提取的公共方法，传递 position 和 imageType
     // 如果 enableModelCapabilities 为 false，跳过季节检测
@@ -517,15 +521,17 @@ export class ImageValidator {
   /**
    * 检测图片是否重复
    * 使用与 PC Worker 一致的十六进制汉明距离算法
+   * 当汉明距离触发阈值时，使用 SSIM 进行二次确认以降低误判率
    */
-  private checkDuplicate(
+  private async checkDuplicate(
     hash: string,
-    currentIndex: number
-  ): {
+    currentIndex: number,
+    currentBuffer?: Buffer
+  ): Promise<{
     isDuplicate: boolean;
     duplicateOf?: number;
     duplicateOfPosition?: string;
-  } {
+  }> {
     // 调试日志：仅输出前几张图片
     if (currentIndex < 5) {
       validationLogger.debug(`图片 #${currentIndex} 哈希: ${hash} (长度: ${hash.length})`);
@@ -545,6 +551,27 @@ export class ImageValidator {
       if (distance <= this.DUPLICATE_THRESHOLD) {
         // 获取原始图片的位置信息
         const duplicateOfPosition = this.imagePositions.get(index) || `图片 #${index + 1}`;
+        
+        // SSIM 二次确认：当有图片 Buffer 时进行结构相似度验证
+        if (currentBuffer && IMAGE_DUP_CONFIG.USE_SSIM) {
+          const existingBuffer = this.imageBuffers.get(index);
+          if (existingBuffer) {
+            try {
+              const ssim = await this.imageProcessor.calculateSSIM(currentBuffer, existingBuffer);
+              validationLogger.info(`SSIM 二次确认: #${currentIndex} vs #${index}, SSIM = ${ssim.toFixed(3)}, 阈值 = ${this.SSIM_THRESHOLD}`);
+              
+              if (ssim < this.SSIM_THRESHOLD) {
+                // SSIM 低于阈值，认为不是重复（误判）
+                validationLogger.info(`❌ SSIM ${ssim.toFixed(3)} < ${this.SSIM_THRESHOLD}，认为不是重复（避免误判）`);
+                continue; // 继续检查其他图片
+              }
+              validationLogger.info(`✅ SSIM ${ssim.toFixed(3)} >= ${this.SSIM_THRESHOLD}，确认重复`);
+            } catch (error) {
+              validationLogger.warn(`SSIM 计算失败，默认使用 blockhash 结果:`, error);
+            }
+          }
+        }
+        
         validationLogger.info(`发现重复! 图片 #${currentIndex} 与 ${duplicateOfPosition} 重复，汉明距离: ${distance}`);
         return {
           isDuplicate: true,
@@ -555,6 +582,17 @@ export class ImageValidator {
     }
 
     return { isDuplicate: false };
+  }
+
+  /**
+   * 存储图片 Buffer（用于 SSIM 二次确认）
+   * 缩小后存储以节省内存
+   */
+  storeImageBuffer(imageIndex: number, buffer: Buffer): void {
+    // 最多存储前 500 张图片以防止内存溢出
+    if (this.imageBuffers.size < 500) {
+      this.imageBuffers.set(imageIndex, buffer);
+    }
   }
 
   /**
@@ -635,5 +673,7 @@ export class ImageValidator {
    */
   reset() {
     this.imageHashes.clear();
+    this.imagePositions.clear();
+    this.imageBuffers.clear();
   }
 }

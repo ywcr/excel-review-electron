@@ -349,10 +349,10 @@ export function ValidationResults({
               )}
             </div>
           </div>
-          <div className="overflow-x-auto border border-zinc-200 rounded-lg">
+          <div className="overflow-x-auto border border-zinc-200 rounded-lg max-h-80 overflow-y-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-zinc-50">
+                <tr className="bg-zinc-50 sticky top-0 z-10">
                   <th className="py-2 px-4 text-xs font-medium text-zinc-400 uppercase tracking-wider border-b border-zinc-200">#</th>
                   <th className="py-2 px-4 text-xs font-medium text-zinc-400 uppercase tracking-wider border-b border-zinc-200">名称</th>
                   <th className="py-2 px-4 text-xs font-medium text-zinc-400 uppercase tracking-wider border-b border-zinc-200">地址</th>

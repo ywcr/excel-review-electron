@@ -4,8 +4,21 @@
  */
 // Use dynamic require to bypass Rollup bundling for native module
 import type * as OnnxRuntime from "onnxruntime-node";
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const ort: typeof OnnxRuntime = require("onnxruntime-node");
+// Lazy load onnxruntime-node to handle lite build (module not available)
+let ort: typeof OnnxRuntime | null = null;
+function getOrt(): typeof OnnxRuntime | null {
+  if (ort === null) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      ort = require("onnxruntime-node");
+    } catch {
+      // Module not available (lite build)
+      ort = null as unknown as typeof OnnxRuntime;
+      return null;
+    }
+  }
+  return ort;
+}
 import sharp from "sharp";
 import { getModelPath } from "../config/paths";
 import { yoloLogger } from "../utils/logger";
@@ -71,10 +84,21 @@ export class YoloDetector {
   }
 
   async initialize(): Promise<boolean> {
+    // 轻量版跳过模型加载
+    if (process.env.BUILD_VARIANT === 'lite') {
+      yoloLogger.info("轻量版构建，跳过 YOLO 模型加载");
+      return false;
+    }
+
     try {
       yoloLogger.info("正在加载模型:", this.modelPath);
 
-      this.session = await ort.InferenceSession.create(this.modelPath, {
+      const ortModule = getOrt();
+      if (!ortModule) {
+        yoloLogger.warn("onnxruntime-node 不可用，跳过 YOLO 初始化");
+        return false;
+      }
+      this.session = await ortModule.InferenceSession.create(this.modelPath, {
         executionProviders: ["cpu"],
         graphOptimizationLevel: "all",
       });
@@ -152,7 +176,8 @@ export class YoloDetector {
       float32Data[2 * pixelCount + i] = data[i * 3 + 2] / 255.0; // B
     }
 
-    const tensor = new ort.Tensor("float32", float32Data, [1, 3, this.inputSize, this.inputSize]);
+    const ortModule = getOrt()!;
+    const tensor = new ortModule.Tensor("float32", float32Data, [1, 3, this.inputSize, this.inputSize]);
 
     return { tensor, originalWidth, originalHeight };
   }
@@ -368,6 +393,24 @@ export class YoloDetector {
     }
 
     return results;
+  }
+
+  /**
+   * 获取初始化状态
+   */
+  isReady(): boolean {
+    return this.session !== null;
+  }
+
+  /**
+   * 释放资源
+   */
+  async dispose(): Promise<void> {
+    if (this.session) {
+      await this.session.release();
+      this.session = null;
+      yoloLogger.info("YOLO session 已释放");
+    }
   }
 }
 

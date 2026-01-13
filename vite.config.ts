@@ -59,4 +59,8 @@ export default defineConfig({
   build: {
     outDir: "dist",
   },
+  define: {
+    // 注入构建变体环境变量，用于条件编译
+    'process.env.BUILD_VARIANT': JSON.stringify(process.env.BUILD_VARIANT || 'full'),
+  },
 });

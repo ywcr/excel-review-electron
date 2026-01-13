@@ -6,10 +6,12 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && electron-builder",
+    "build": "tsc && vite build && electron-builder --config electron-builder.config.js",
+    "build:lite": "tsc && vite build && cross-env BUILD_VARIANT=lite electron-builder --config electron-builder.config.js",
+    "build:full": "tsc && vite build && cross-env BUILD_VARIANT=full electron-builder --config electron-builder.config.js",
     "preview": "vite preview",
-    "build:mac": "npm run build && electron-builder --mac",
-    "build:win": "npm run build && electron-builder --win"
+    "build:mac": "npm run build:full && electron-builder --mac --config electron-builder.config.js",
+    "build:win": "npm run build:full && electron-builder --win --config electron-builder.config.js"
   },
   "dependencies": {
     "@types/yauzl": "^2.10.3",
@@ -34,6 +36,7 @@
     "@types/react": "^18.2.48",
     "@types/react-dom": "^18.2.18",
     "@vitejs/plugin-react": "^4.2.1",
+    "cross-env": "^10.1.0",
     "electron": "^33.0.0",
     "electron-builder": "^24.9.1",
     "postcss": "^8.5.6",

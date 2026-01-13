@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import { useValidation } from "../contexts/ValidationContext";
 import { useValidationSettings } from "../hooks/useValidationSettings";
+import { useLiteVersion } from "../hooks/useLiteVersion";
 import { ValidationResults } from "./ValidationResults";
 import { ValidationRequirements } from "./ValidationRequirements";
 import { GhostButton } from "./UI/Buttons";
@@ -46,6 +47,9 @@ export function SingleFileValidation({
     setValidateAllImages,
     setEnableModelCapabilities,
   } = useValidationSettings();
+
+  // 检测是否为轻量版（隐藏模型能力开关）
+  const { isLite } = useLiteVersion();
 
   const {
     isValidating,
@@ -347,20 +351,22 @@ export function SingleFileValidation({
             </span>
           </label>
           
-          {/* 开启模型能力选项 */}
-          <label className="flex items-center gap-2 mt-3 cursor-pointer group">
-            <input
-              type="checkbox"
-              checked={enableModelCapabilities}
-              onChange={(e) => setEnableModelCapabilities(e.target.checked)}
-              disabled={isValidating}
-              className="w-4 h-4 rounded border-zinc-300 text-black focus:ring-black disabled:opacity-50"
-            />
-            <span className="text-sm text-zinc-600 group-hover:text-zinc-900 transition-colors">
-              开启模型能力
-              <span className="text-xs text-zinc-400 ml-1">(季节检测、物体重复检测)</span>
-            </span>
-          </label>
+          {/* 开启模型能力选项 - 轻量版隐藏 */}
+          {!isLite && (
+            <label className="flex items-center gap-2 mt-3 cursor-pointer group">
+              <input
+                type="checkbox"
+                checked={enableModelCapabilities}
+                onChange={(e) => setEnableModelCapabilities(e.target.checked)}
+                disabled={isValidating}
+                className="w-4 h-4 rounded border-zinc-300 text-black focus:ring-black disabled:opacity-50"
+              />
+              <span className="text-sm text-zinc-600 group-hover:text-zinc-900 transition-colors">
+                开启模型能力
+                <span className="text-xs text-zinc-400 ml-1">(季节检测、物体重复检测)</span>
+              </span>
+            </label>
+          )}
 
           {/* 合并验证模式开关 */}
           <label className="flex items-center gap-2 mt-3 cursor-pointer group">
@@ -392,11 +398,12 @@ export function SingleFileValidation({
               <div className="space-y-3">
                 <label className="text-xs font-medium text-zinc-500">文件 A</label>
                 <div 
-                  className={`flex flex-col gap-3 p-4 rounded-lg border-2 border-dashed transition-all duration-200 border-zinc-300 hover:border-zinc-400 ${isValidating ? 'opacity-50 pointer-events-none' : ''}`}
+                  className={`flex flex-col gap-3 p-4 rounded-lg border-2 border-dashed transition-all duration-200 border-zinc-300 hover:border-zinc-400 cursor-pointer ${isValidating ? 'opacity-50 pointer-events-none' : ''}`}
                   onDragEnter={handleDragEnter}
                   onDragLeave={handleDragLeave}
                   onDragOver={handleDragOver}
                   onDrop={handleDrop}
+                  onClick={handleSelectFile}
                 >
                   {selectedFile ? (
                     <div className="flex items-center gap-2">
@@ -404,12 +411,12 @@ export function SingleFileValidation({
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-bold text-zinc-900 truncate">{fileName}</p>
                       </div>
-                      <GhostButton onClick={handleSelectFile} disabled={isValidating} className="shrink-0 text-xs">更换</GhostButton>
+                      <GhostButton onClick={(e) => { e.stopPropagation(); handleSelectFile(); }} disabled={isValidating} className="shrink-0 text-xs">更换</GhostButton>
                     </div>
                   ) : (
                     <div className="flex flex-col items-center gap-2 py-2">
                       <div className="text-2xl">📁</div>
-                      <GhostButton onClick={handleSelectFile} disabled={isValidating} className="text-xs">选择文件 A...</GhostButton>
+                      <span className="text-xs text-zinc-500">点击或拖拽文件 A</span>
                     </div>
                   )}
                 </div>
@@ -436,11 +443,12 @@ export function SingleFileValidation({
               <div className="space-y-3">
                 <label className="text-xs font-medium text-zinc-500">文件 B</label>
                 <div 
-                  className={`flex flex-col gap-3 p-4 rounded-lg border-2 border-dashed transition-all duration-200 border-zinc-300 hover:border-zinc-400 ${isValidating ? 'opacity-50 pointer-events-none' : ''}`}
+                  className={`flex flex-col gap-3 p-4 rounded-lg border-2 border-dashed transition-all duration-200 border-zinc-300 hover:border-zinc-400 cursor-pointer ${isValidating ? 'opacity-50 pointer-events-none' : ''}`}
                   onDragEnter={handleDragEnter2}
                   onDragLeave={handleDragLeave2}
                   onDragOver={handleDragOver}
                   onDrop={handleDrop2}
+                  onClick={handleSelectFile2}
                 >
                   {selectedFile2 ? (
                     <div className="flex items-center gap-2">
@@ -448,12 +456,12 @@ export function SingleFileValidation({
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-bold text-zinc-900 truncate">{fileName2}</p>
                       </div>
-                      <GhostButton onClick={handleSelectFile2} disabled={isValidating} className="shrink-0 text-xs">更换</GhostButton>
+                      <GhostButton onClick={(e) => { e.stopPropagation(); handleSelectFile2(); }} disabled={isValidating} className="shrink-0 text-xs">更换</GhostButton>
                     </div>
                   ) : (
                     <div className="flex flex-col items-center gap-2 py-2">
                       <div className="text-2xl">📁</div>
-                      <GhostButton onClick={handleSelectFile2} disabled={isValidating} className="text-xs">选择文件 B...</GhostButton>
+                      <span className="text-xs text-zinc-500">点击或拖拽文件 B</span>
                     </div>
                   )}
                 </div>

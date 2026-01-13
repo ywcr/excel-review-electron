@@ -12,10 +12,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Windows 完整版
           - os: windows-latest
             platform: win
+            variant: full
+          # Windows 轻量版
+          - os: windows-latest
+            platform: win
+            variant: lite
+          # macOS 完整版
           - os: macos-15
             platform: mac
+            variant: full
+          # macOS 轻量版
+          - os: macos-15
+            platform: mac
+            variant: lite
 
     runs-on: ${{ matrix.os }}
 
@@ -38,20 +50,28 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build Electron app
-        run: npx tsc && npx vite build && npx electron-builder --publish never
+      - name: Build Electron app (${{ matrix.variant }})
+        run: |
+          npx tsc
+          npx vite build
+          npx electron-builder --config electron-builder.config.js --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUILD_VARIANT: ${{ matrix.variant }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-${{ matrix.platform }}
+          name: release-${{ matrix.platform }}-${{ matrix.variant }}
           path: |
             release/*.exe
             release/*.dmg
             release/*.zip
             release/*.AppImage
+            release-lite/*.exe
+            release-lite/*.dmg
+            release-lite/*.zip
+            release-lite/*.AppImage
           if-no-files-found: ignore
 
   release:

@@ -423,4 +423,98 @@ export class ImageProcessor {
       return null;
     }
   }
+
+  /**
+   * 计算两张图片的 SSIM (Structural Similarity Index)
+   * 用于二次确认重复检测，降低误判率
+   * 
+   * SSIM 综合考虑亮度、对比度、结构三个维度
+   * 返回 0-1 的相似度分数，>= 0.85 通常认为是相同图片
+   * 
+   * @param image1 第一张图片 Buffer
+   * @param image2 第二张图片 Buffer
+   * @param windowSize 计算窗口大小（默认 8）
+   * @returns SSIM 分数 (0-1)
+   */
+  async calculateSSIM(
+    image1: Buffer,
+    image2: Buffer,
+    windowSize: number = 8
+  ): Promise<number> {
+    try {
+      // 统一缩放到相同尺寸以便比较（64x64 足够用于相似度判断）
+      const targetSize = 64;
+      
+      const [data1, data2] = await Promise.all([
+        sharp(image1)
+          .resize(targetSize, targetSize, { fit: "fill" })
+          .greyscale()
+          .raw()
+          .toBuffer(),
+        sharp(image2)
+          .resize(targetSize, targetSize, { fit: "fill" })
+          .greyscale()
+          .raw()
+          .toBuffer(),
+      ]);
+
+      // SSIM 常量（标准值）
+      const K1 = 0.01;
+      const K2 = 0.03;
+      const L = 255; // 像素动态范围
+      const C1 = (K1 * L) ** 2;
+      const C2 = (K2 * L) ** 2;
+
+      let ssimSum = 0;
+      let windowCount = 0;
+
+      // 滑动窗口计算局部 SSIM
+      for (let y = 0; y <= targetSize - windowSize; y += windowSize / 2) {
+        for (let x = 0; x <= targetSize - windowSize; x += windowSize / 2) {
+          // 提取窗口内的像素值
+          const window1: number[] = [];
+          const window2: number[] = [];
+
+          for (let wy = 0; wy < windowSize; wy++) {
+            for (let wx = 0; wx < windowSize; wx++) {
+              const idx = (y + wy) * targetSize + (x + wx);
+              window1.push(data1[idx]);
+              window2.push(data2[idx]);
+            }
+          }
+
+          // 计算均值
+          const mean1 = window1.reduce((a, b) => a + b, 0) / window1.length;
+          const mean2 = window2.reduce((a, b) => a + b, 0) / window2.length;
+
+          // 计算方差和协方差
+          let var1 = 0, var2 = 0, covar = 0;
+          for (let i = 0; i < window1.length; i++) {
+            const diff1 = window1[i] - mean1;
+            const diff2 = window2[i] - mean2;
+            var1 += diff1 * diff1;
+            var2 += diff2 * diff2;
+            covar += diff1 * diff2;
+          }
+          var1 /= window1.length;
+          var2 /= window2.length;
+          covar /= window1.length;
+
+          // 计算 SSIM 分量
+          const luminance = (2 * mean1 * mean2 + C1) / (mean1 ** 2 + mean2 ** 2 + C1);
+          const contrast = (2 * Math.sqrt(var1) * Math.sqrt(var2) + C2) / (var1 + var2 + C2);
+          const structure = (covar + C2 / 2) / (Math.sqrt(var1) * Math.sqrt(var2) + C2 / 2);
+
+          ssimSum += luminance * contrast * structure;
+          windowCount++;
+        }
+      }
+
+      // 返回平均 SSIM
+      return windowCount > 0 ? ssimSum / windowCount : 0;
+    } catch (error) {
+      console.error("SSIM 计算失败:", error);
+      return 0;
+    }
+  }
 }

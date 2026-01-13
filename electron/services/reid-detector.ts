@@ -7,8 +7,21 @@
  */
 // Use dynamic require to bypass Rollup bundling for native module
 import type * as OnnxRuntime from "onnxruntime-node";
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const ort: typeof OnnxRuntime = require("onnxruntime-node");
+// Lazy load onnxruntime-node to handle lite build (module not available)
+let ort: typeof OnnxRuntime | null = null;
+function getOrt(): typeof OnnxRuntime | null {
+  if (ort === null) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      ort = require("onnxruntime-node");
+    } catch {
+      // Module not available (lite build)
+      ort = null as unknown as typeof OnnxRuntime;
+      return null;
+    }
+  }
+  return ort;
+}
 import * as path from "path";
 import * as fs from "fs";
 import sharp from "sharp";
@@ -74,6 +87,12 @@ export class ReidDetector {
   async initialize(): Promise<boolean> {
     if (this.isInitialized) return true;
 
+    // 轻量版跳过模型加载
+    if (process.env.BUILD_VARIANT === 'lite') {
+      duplicateLogger.info("[ReID] 轻量版构建，跳过 OSNet 模型加载");
+      return false;
+    }
+
     const modelPath = path.join(this.modelDir, "osnet_x0_75.onnx");
 
     // 检查模型文件是否存在
@@ -84,8 +103,13 @@ export class ReidDetector {
     }
 
     try {
+      const ortModule = getOrt();
+      if (!ortModule) {
+        duplicateLogger.warn("[ReID] onnxruntime-node 不可用，跳过 OSNet 初始化");
+        return false;
+      }
       duplicateLogger.info(`[ReID] 正在加载 OSNet 模型...`);
-      this.session = await ort.InferenceSession.create(modelPath, {
+      this.session = await ortModule.InferenceSession.create(modelPath, {
         executionProviders: ["cpu"],
       });
       
@@ -148,7 +172,8 @@ export class ReidDetector {
 
     try {
       const pixels = await this.preprocessImage(personCropBuffer);
-      const inputTensor = new ort.Tensor(
+      const ortModule = getOrt()!;
+      const inputTensor = new ortModule.Tensor(
         "float32", 
         pixels, 
         [1, 3, REID_CONFIG.INPUT_HEIGHT, REID_CONFIG.INPUT_WIDTH]

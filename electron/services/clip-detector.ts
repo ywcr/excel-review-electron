@@ -6,8 +6,21 @@
  */
 // Use dynamic require to bypass Rollup bundling for native module
 import type * as OnnxRuntime from "onnxruntime-node";
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const ort: typeof OnnxRuntime = require("onnxruntime-node");
+// Lazy load onnxruntime-node to handle lite build (module not available)
+let ort: typeof OnnxRuntime | null = null;
+function getOrt(): typeof OnnxRuntime | null {
+  if (ort === null) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      ort = require("onnxruntime-node");
+    } catch {
+      // Module not available (lite build)
+      ort = null as unknown as typeof OnnxRuntime;
+      return null;
+    }
+  }
+  return ort;
+}
 import * as path from "path";
 import * as fs from "fs";
 import sharp from "sharp";
@@ -90,6 +103,12 @@ export class ClipDetector {
   async initialize(): Promise<boolean> {
     if (this.isInitialized) return true;
 
+    // 轻量版跳过模型加载
+    if (process.env.BUILD_VARIANT === 'lite') {
+      clipLogger.info("轻量版构建，跳过 CLIP 模型加载");
+      return false;
+    }
+
     // 优先使用 FP16 量化模型（更小），否则使用原始模型
     let visualModelPath = path.join(this.modelDir, "clip-visual-fp16.onnx");
     if (!fs.existsSync(visualModelPath)) {
@@ -105,8 +124,13 @@ export class ClipDetector {
     }
 
     try {
+      const ortModule = getOrt();
+      if (!ortModule) {
+        clipLogger.warn("onnxruntime-node 不可用，跳过 CLIP 初始化");
+        return false;
+      }
       clipLogger.info("Loading CLIP visual model...");
-      this.visualSession = await ort.InferenceSession.create(visualModelPath, {
+      this.visualSession = await ortModule.InferenceSession.create(visualModelPath, {
         executionProviders: ["cpu"],
       });
 
@@ -121,7 +145,8 @@ export class ClipDetector {
       } else if (fs.existsSync(textModelPath)) {
         // 如果有文本模型，动态计算嵌入
         clipLogger.info("Loading CLIP text model...");
-        this.textSession = await ort.InferenceSession.create(textModelPath, {
+        const ortModule = getOrt()!;
+        this.textSession = await ortModule.InferenceSession.create(textModelPath, {
           executionProviders: ["cpu"],
         });
         // 预计算所有需要的文本嵌入
@@ -227,7 +252,8 @@ export class ClipDetector {
     try {
       // 1. 预处理图片
       const pixels = await this.preprocessImage(imageBuffer);
-      const inputTensor = new ort.Tensor("float32", pixels, [1, 3, 224, 224]);
+      const ortModule = getOrt()!;
+      const inputTensor = new ortModule.Tensor("float32", pixels, [1, 3, 224, 224]);
 
       // 2. 获取图片嵌入
       const outputs = await this.visualSession.run({ input: inputTensor });
@@ -552,7 +578,8 @@ export class ClipDetector {
 
     try {
       const pixels = await this.preprocessImage(imageBuffer);
-      const inputTensor = new ort.Tensor("float32", pixels, [1, 3, 224, 224]);
+      const ortModule = getOrt()!;
+      const inputTensor = new ortModule.Tensor("float32", pixels, [1, 3, 224, 224]);
       const outputs = await this.visualSession.run({ input: inputTensor });
       return outputs.output.data as Float32Array;
     } catch (error) {

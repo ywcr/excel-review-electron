@@ -46,6 +46,71 @@ app.on("window-all-closed", () => {
   }
 });
 
+// 应用退出前清理资源
+let isCleanupDone = false;
+
+app.on("before-quit", async (event) => {
+  // 防止重复清理
+  if (isCleanupDone) return;
+  
+  // 阻止立即退出，等待清理完成
+  event.preventDefault();
+  
+  console.log("🧹 正在清理资源...");
+  
+  // 设置强制退出超时（3秒后强制退出，防止进程残留）
+  const forceExitTimeout = setTimeout(() => {
+    console.log("⚠️ 清理超时，强制退出进程");
+    process.exit(0);
+  }, 3000);
+  
+  try {
+    // 取消正在进行的验证任务
+    if (currentProcessor) {
+      currentProcessor.cancel();
+      currentProcessor = null;
+      console.log("✅ 已取消正在进行的验证任务");
+    }
+    
+    // 释放 YOLO/CLIP/ReID 模型资源（如果加载了的话）
+    try {
+      const { getYoloDetector } = await import("./services/yolo-detector");
+      const { getClipDetector } = await import("./services/clip-detector");
+      const { getReidDetector } = await import("./services/reid-detector");
+      
+      // 这些 getter 不会重新加载模型，只返回已有实例
+      // 调用 dispose 释放资源
+      const yolo = getYoloDetector();
+      const clip = getClipDetector();
+      const reid = getReidDetector();
+      
+      // 并行释放所有模型资源
+      await Promise.all([
+        yolo.dispose?.(),
+        clip.dispose?.(),
+        reid.dispose?.(),
+      ]);
+      console.log("✅ 已释放模型资源");
+    } catch {
+      // 轻量版可能没有这些模块，忽略错误
+      console.log("ℹ️ 模型资源释放跳过 (轻量版或未加载)");
+    }
+    
+    console.log("🧹 资源清理完成");
+  } finally {
+    // 清除强制退出超时
+    clearTimeout(forceExitTimeout);
+    
+    // 标记清理完成，然后真正退出
+    isCleanupDone = true;
+    
+    // 使用 process.exit 确保立即退出，不再依赖 app.quit
+    // 这可以确保即使有残留的 libuv 句柄（如 sharp 的 libvips 线程池）也能退出
+    console.log("👋 正在退出应用...");
+    process.exit(0);
+  }
+});
+
 // IPC 处理器注册
 function registerIpcHandlers() {
   // 选择单个文件
@@ -613,6 +678,16 @@ function registerIpcHandlers() {
         success: false,
         error: error instanceof Error ? error.message : String(error),
       };
+    }
+  });
+
+  // 检测是否为轻量版（通过检测 onnxruntime-node 是否可用）
+  ipcMain.handle("is-lite-version", async () => {
+    try {
+      require("onnxruntime-node");
+      return false; // 模块存在，不是轻量版
+    } catch {
+      return true; // 模块不存在，是轻量版
     }
   });
 }

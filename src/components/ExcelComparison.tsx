@@ -412,7 +412,7 @@ export function ExcelComparison() {
       <div className="space-y-6 animate-fade-in font-sans">
         <div className="flex items-center justify-between pb-6 border-b border-zinc-100">
           <h2 className="text-xl font-bold text-zinc-900 tracking-tight flex items-center gap-2">
-            <span>📊</span> 文件比较
+            <span>📊</span> Excel文件比较
           </h2>
           <OutlineButton onClick={handleReset} className="h-8 text-xs">重新比较</OutlineButton>
         </div>
@@ -431,7 +431,7 @@ export function ExcelComparison() {
     <div className="space-y-6 animate-fade-in font-sans">
       <div className="flex items-center justify-between pb-6 border-b border-zinc-100">
         <h2 className="text-xl font-extrabold text-zinc-900 tracking-tight flex items-center gap-2">
-          <span>📊</span> 文件比较
+          <span>📊</span> Excel文件比较
         </h2>
         {(result || beforeFile || afterFile) && (
           <OutlineButton onClick={handleReset} className="h-8 text-xs">
